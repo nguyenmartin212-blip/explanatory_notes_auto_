@@ -66,7 +66,7 @@ export function MapScreen() {
     <View style={styles.container}>
       <MapView
         ref={mapRef}
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         initialRegion={VIETNAM_REGION}
         mapType={mapType}
         showsCompass

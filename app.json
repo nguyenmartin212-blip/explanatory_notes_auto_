@@ -15,7 +15,8 @@
       "package": "com.explanatorynotesauto.app"
     },
     "plugins": [
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-audio"
     ]
   }
 }

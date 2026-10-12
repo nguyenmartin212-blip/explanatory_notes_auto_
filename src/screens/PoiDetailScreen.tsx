@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Screen } from '@/components';
-import { NarrationButton } from '@/features/narration';
+import { NarrationPlayer } from '@/features/narration/components/NarrationPlayer';
 import { mockPois } from '@/features/poi';
 import type { RootStackParamList } from '@/navigation';
 import type { SupportedLanguage } from '@/types';
@@ -70,19 +70,21 @@ export function PoiDetailScreen({ route }: Props) {
           <Text style={styles.storyEyebrow}>✦ LỜI DẪN THUYẾT MINH</Text>
           <Text style={styles.storyText}>{script ?? 'Nội dung đang được cập nhật.'}</Text>
           <Text style={styles.storyNote}>
-            Nội dung minh họa. Chức năng phát giọng nói sẽ được kết nối với Narration Engine ở bước tiếp theo.
+Nội dung demo được đọc bằng giọng TTS trên thiết bị. Bản thu âm sẽ được ưu tiên nếu POI có đường dẫn audio cho ngôn ngữ đã chọn.
           </Text>
         </View>
 
-        <View style={styles.actions}>
-          <NarrationButton
-            poiName={title}
-            onPress={() => Alert.alert(
-              'Thuyết minh đang hoàn thiện',
-              'Giao diện đã sẵn sàng. Bước tiếp theo sẽ tích hợp phát audio/TTS với Narration Engine.',
-            )}
-          />
-        </View>
+        {route.params.origin === 'qr' && (
+          <View style={styles.qrActivated}>
+            <Text style={styles.qrActivatedText}>▦ Nội dung được kích hoạt bằng QR · không dùng GPS</Text>
+          </View>
+        )}
+        <NarrationPlayer
+          poi={poi}
+          language={language}
+          autoStart={route.params.autoplay === true}
+          origin={route.params.origin ?? 'manual'}
+        />
         <Text style={styles.disclaimer}>Vị trí và nội dung trong bản demo chỉ mang tính giới thiệu.</Text>
       </ScrollView>
     </Screen>
@@ -111,6 +113,7 @@ const styles = StyleSheet.create({
   storyEyebrow: { color: colors.primary, fontSize: 10, fontWeight: '800', letterSpacing: 1.1 },
   storyText: { color: colors.text, fontSize: 14, lineHeight: 23, marginTop: 10 },
   storyNote: { color: colors.muted, fontSize: 11, lineHeight: 17, marginTop: 13 },
-  actions: { marginTop: 18 },
+  qrActivated: { marginTop: 18, backgroundColor: '#E6EFE9', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
+  qrActivatedText: { color: colors.teal, fontSize: 11, fontWeight: '800', textAlign: 'center' },
   disclaimer: { marginTop: 14, textAlign: 'center', color: colors.muted, fontSize: 11 },
 });
