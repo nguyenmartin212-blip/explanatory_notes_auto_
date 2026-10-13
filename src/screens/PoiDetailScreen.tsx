@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Screen } from '@/components';
 import { NarrationPlayer } from '@/features/narration/components/NarrationPlayer';
-import { mockPois } from '@/features/poi';
+import { useOfflinePoi } from '@/features/content';
 import type { RootStackParamList } from '@/navigation';
 import type { SupportedLanguage } from '@/types';
 import { colors, radius, spacing } from '@/theme';
@@ -16,13 +16,21 @@ const LANGUAGES: { key: SupportedLanguage; label: string }[] = [
 ];
 
 export function PoiDetailScreen({ route }: Props) {
-  const poi = mockPois.find((item) => item.id === route.params.poiId);
+  const { poi, isLoading, error } = useOfflinePoi(route.params.poiId);
   const [language, setLanguage] = useState<SupportedLanguage>('vi');
+
+  if (isLoading) {
+    return (
+      <Screen>
+        <Text style={styles.notFound}>Đang tải nội dung offline…</Text>
+      </Screen>
+    );
+  }
 
   if (!poi) {
     return (
       <Screen>
-        <Text style={styles.notFound}>Không tìm thấy điểm thuyết minh.</Text>
+        <Text style={styles.notFound}>{error ?? 'Không tìm thấy điểm thuyết minh.'}</Text>
       </Screen>
     );
   }
@@ -40,6 +48,8 @@ export function PoiDetailScreen({ route }: Props) {
           <Text style={styles.heroTitle}>{title}</Text>
           <Text style={styles.heroCaption}>Khám phá câu chuyện phía sau mỗi điểm đến</Text>
         </View>
+
+        <View style={styles.offlineBadge}><Text style={styles.offlineBadgeText}>▣ CONTENT LAYER · SQLITE OFFLINE</Text></View>
 
         <View style={styles.metaRow}>
           <View style={styles.metaPill}><Text style={styles.metaText}>◎ POI đã xác định</Text></View>
@@ -99,6 +109,8 @@ const styles = StyleSheet.create({
   heroHint: { color: '#F0D0A2', letterSpacing: 1.2, fontSize: 10, fontWeight: '800' },
   heroTitle: { color: '#fff', fontSize: 30, lineHeight: 37, fontWeight: '800', marginTop: 7 },
   heroCaption: { color: '#D8E7E4', fontSize: 12, marginTop: 9 },
+  offlineBadge: { alignSelf: 'flex-start', marginTop: 14, backgroundColor: '#E6EFE9', borderRadius: 99, paddingHorizontal: 11, paddingVertical: 7 },
+  offlineBadgeText: { color: colors.teal, fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
   metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 15 },
   metaPill: { backgroundColor: '#E6EFE9', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 99 },
   metaText: { color: colors.teal, fontWeight: '700', fontSize: 11 },

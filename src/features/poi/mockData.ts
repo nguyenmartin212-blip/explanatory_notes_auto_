@@ -19,6 +19,7 @@ export const mockPois: Poi[] = [
     radiusMeters: 80,
     priority: 10,
     images: [],
+    mapUrl: 'https://www.google.com/maps/search/?api=1&query=21.0353,105.8402',
     ttsScript: {
       vi: 'Hoàng thành Thăng Long là không gian di sản lịch sử tiêu biểu tại Hà Nội.',
       en: 'The Imperial Citadel of Thang Long is an important historic heritage site in Hanoi.',
@@ -42,6 +43,7 @@ export const mockPois: Poi[] = [
     radiusMeters: 120,
     priority: 10,
     images: [],
+    mapUrl: 'https://www.google.com/maps/search/?api=1&query=16.4690,107.5788',
     ttsScript: {
       vi: 'Đại Nội Huế là một phần quan trọng của quần thể di tích Cố đô Huế.',
       en: 'Hue Imperial City is a central part of the Complex of Hue Monuments.',
@@ -65,6 +67,7 @@ export const mockPois: Poi[] = [
     radiusMeters: 90,
     priority: 8,
     images: [],
+    mapUrl: 'https://www.google.com/maps/search/?api=1&query=10.7721,106.6983',
     ttsScript: {
       vi: 'Chợ Bến Thành là một trong những địa điểm quen thuộc tại trung tâm Thành phố Hồ Chí Minh.',
       en: 'Ben Thanh Market is one of the most recognizable places in central Ho Chi Minh City.',
