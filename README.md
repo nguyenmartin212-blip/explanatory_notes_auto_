@@ -1,75 +1,56 @@
-# React + TypeScript + Vite
+# Explanatory Notes Auto — Mobile
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React Native + Expo frontend for the multilingual automatic tour-guide project.
 
-Currently, two official plugins are available:
+## Architecture
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+The codebase uses a feature-based frontend architecture:
 
-## React Compiler
+- `src/components`: reusable UI/layout components without business rules.
+- `src/features`: independent business features. Each feature exposes a public API through `index.ts`.
+- `src/screens`: application screens.
+- `src/navigation`: React Navigation configuration.
+- `src/services`: shared API/network clients.
+- `src/store`: global state when needed.
+- `src/hooks`: shared hooks.
+- `src/theme`: colors, spacing, radius and design tokens.
+- `src/types`: app-wide TypeScript types.
+- `src/utils`: pure utility functions.
+- `src/constants`: static app configuration.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Core features planned
 
-## Expanding the ESLint configuration
+1. Map + POI
+2. GPS foreground/background tracking
+3. Geofence engine
+4. Contextual narration + audio/TTS
+5. Multilingual content
+6. QR activation
+7. Itinerary sync
+8. Offline content
+9. CI/CD
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Local setup
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```bash
+npm install
+npm run typecheck
+npm run lint
+npm test
+npx expo start
 ```
 
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
+## Git flow
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Recommended:
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```text
+main
+└── develop
+    ├── feature/map-poi
+    ├── feature/geofence
+    ├── feature/narration
+    └── feature/qr
 ```
+
+Merge features into `develop` through Pull Requests. Merge `develop` into `main` for releases.
