@@ -166,6 +166,7 @@ export function stopNarrationRuntime(
   state: NarrationRuntimeState,
 ): NarrationRuntimeState {
   return {
+    ...state,
     current: null,
     queue: [],
   };
