@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import MapView, { Marker, type Region } from 'react-native-maps';
 import * as Location from 'expo-location';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
@@ -22,7 +23,7 @@ import {
   selectActivePoi,
 } from '@/features/geofence';
 import type { RootStackParamList } from '@/navigation';
-import { colors, radius, spacing } from '@/theme';
+import { colors } from '@/theme';
 
 const VIETNAM_REGION: Region = {
   latitude: 16.4,
@@ -41,6 +42,9 @@ const USER_REGION_DELTA = {
   longitudeDelta: 0.012,
 };
 
+const FILTERS = ['Tất cả', 'Di sản', 'Tâm linh', 'Văn hóa'] as const;
+
+type Filter = (typeof FILTERS)[number];
 type RootNav = NativeStackNavigationProp<RootStackParamList>;
 type PermissionState = 'not-requested' | 'granted' | 'denied';
 
@@ -66,6 +70,52 @@ function toLiveLocation(position: Location.LocationObject): LiveLocation {
   };
 }
 
+function categoryForPoi(poi: Poi): Exclude<Filter, 'Tất cả'> {
+  const key = `${poi.id} ${poi.name.vi}`.toLocaleLowerCase('vi-VN');
+
+  if (
+    key.includes('chùa') ||
+    key.includes('thiên mụ') ||
+    key.includes('temple') ||
+    key.includes('pagoda')
+  ) {
+    return 'Tâm linh';
+  }
+
+  if (
+    key.includes('chợ') ||
+    key.includes('ben-thanh') ||
+    key.includes('bến thành')
+  ) {
+    return 'Văn hóa';
+  }
+
+  return 'Di sản';
+}
+
+function metaForPoi(poi: Poi) {
+  const category = categoryForPoi(poi);
+
+  if (poi.id.includes('hue')) {
+    return {
+      category,
+      duration: '12 phút thuyết minh',
+    };
+  }
+
+  if (poi.id.includes('thang-long')) {
+    return {
+      category,
+      duration: '10 phút thuyết minh',
+    };
+  }
+
+  return {
+    category,
+    duration: '8 phút thuyết minh',
+  };
+}
+
 export function MapScreen() {
   const mapRef = useRef<MapView>(null);
   const focusOnNextFix = useRef(false);
@@ -82,11 +132,11 @@ export function MapScreen() {
   const [locationError, setLocationError] = useState<string | null>(null);
 
   const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<Filter>('Tất cả');
   const [activeId, setActiveId] = useState<string | null>(null);
   const [arrivalPoiId, setArrivalPoiId] = useState<string | null>(null);
   const [demoArrival, setDemoArrival] = useState(false);
-  const [mapType, setMapType] =
-    useState<'standard' | 'satellite'>('standard');
+  const [mapType, setMapType] = useState<'standard' | 'satellite'>('standard');
 
   const {
     pois,
@@ -101,10 +151,10 @@ export function MapScreen() {
     try {
       const result = await Location.requestForegroundPermissionsAsync();
 
-      if (result.status !== Location.PermissionStatus.GRANTED) {
+      if (result.status !== 'granted') {
         setPermissionStatus('denied');
         setLocationError(
-          'Ứng dụng cần quyền vị trí để hiển thị khoảng cách và kích hoạt geofence.',
+          'Go to Horizon cần quyền vị trí để hiển thị khoảng cách và kích hoạt vùng thuyết minh.',
         );
         return false;
       }
@@ -114,8 +164,8 @@ export function MapScreen() {
       const current = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
-      setLocation(toLiveLocation(current));
 
+      setLocation(toLiveLocation(current));
       return true;
     } catch {
       setLocationError('Không thể lấy vị trí hiện tại. Vui lòng thử lại.');
@@ -131,11 +181,12 @@ export function MapScreen() {
     void (async () => {
       try {
         const permission = await Location.getForegroundPermissionsAsync();
+
         if (cancelled) return;
 
-        if (permission.status === Location.PermissionStatus.GRANTED) {
+        if (permission.status === 'granted') {
           setPermissionStatus('granted');
-        } else if (permission.status === Location.PermissionStatus.DENIED) {
+        } else if (permission.status === 'denied') {
           setPermissionStatus('denied');
         } else {
           setPermissionStatus('not-requested');
@@ -169,7 +220,7 @@ export function MapScreen() {
             distanceInterval: 5,
             timeInterval: 4_000,
           },
-          (position) => {
+          (position: Location.LocationObject) => {
             if (!cancelled) {
               setLocation(toLiveLocation(position));
             }
@@ -189,7 +240,6 @@ export function MapScreen() {
 
     return () => {
       cancelled = true;
-      setIsTracking(false);
       subscription?.remove();
     };
   }, [isFocused, permissionStatus]);
@@ -197,15 +247,19 @@ export function MapScreen() {
   const filteredPois = useMemo(() => {
     const query = search.trim().toLocaleLowerCase('vi-VN');
 
-    const matching = !query
-      ? [...pois]
-      : pois.filter((poi) =>
-          [poi.name.vi, poi.name.en, poi.name.zh]
-            .filter((value): value is string => Boolean(value))
-            .some((value) =>
-              value.toLocaleLowerCase('vi-VN').includes(query),
-            ),
+    const matching = pois.filter((poi) => {
+      const matchesFilter =
+        filter === 'Tất cả' || categoryForPoi(poi) === filter;
+
+      if (!matchesFilter) return false;
+      if (!query) return true;
+
+      return [poi.name.vi, poi.name.en, poi.name.zh, poi.description.vi]
+        .filter((value): value is string => Boolean(value))
+        .some((value) =>
+          value.toLocaleLowerCase('vi-VN').includes(query),
         );
+    });
 
     if (location) {
       matching.sort(
@@ -216,19 +270,26 @@ export function MapScreen() {
     }
 
     return matching;
-  }, [search, location, pois]);
+  }, [filter, location, pois, search]);
 
   const activePoi =
     filteredPois.find((poi) => poi.id === activeId) ?? null;
 
-  const activeResult =
-    activePoi && location ? evaluatePoi(location, activePoi) : null;
+  const nearestRelevant =
+    location && pois.length ? selectActivePoi(location, pois) : null;
+
+  const selectedPoi =
+    activePoi ??
+    (nearestRelevant && filteredPois.some((poi) => poi.id === nearestRelevant.poi.id)
+      ? nearestRelevant.poi
+      : filteredPois[0]) ??
+    null;
+
+  const selectedResult =
+    selectedPoi && location ? evaluatePoi(location, selectedPoi) : null;
 
   const arrivalPoi =
     pois.find((poi) => poi.id === arrivalPoiId) ?? null;
-
-  const nearestRelevant =
-    location && pois.length ? selectActivePoi(location, pois) : null;
 
   useEffect(() => {
     if (
@@ -256,8 +317,9 @@ export function MapScreen() {
     if (update.trigger) {
       setDemoArrival(false);
       setArrivalPoiId(update.trigger.poiId);
+      setActiveId(update.trigger.poiId);
     }
-  }, [location, permissionStatus, isFocused, pois]);
+  }, [isFocused, location, permissionStatus, pois]);
 
   useEffect(() => {
     if (permissionStatus !== 'granted') {
@@ -267,11 +329,7 @@ export function MapScreen() {
   }, [permissionStatus]);
 
   useEffect(() => {
-    if (
-      !location ||
-      !focusOnNextFix.current ||
-      !isFocused
-    ) {
+    if (!location || !focusOnNextFix.current || !isFocused) {
       return;
     }
 
@@ -285,10 +343,11 @@ export function MapScreen() {
       },
       650,
     );
-  }, [location, isFocused]);
+  }, [isFocused, location]);
 
   function focusPoi(poi: Poi) {
     setActiveId(poi.id);
+    setSearch('');
 
     mapRef.current?.animateToRegion(
       {
@@ -303,10 +362,7 @@ export function MapScreen() {
   async function locateMe() {
     focusOnNextFix.current = true;
 
-    if (
-      location &&
-      permissionStatus === 'granted'
-    ) {
+    if (location && permissionStatus === 'granted') {
       mapRef.current?.animateToRegion(
         {
           latitude: location.latitude,
@@ -329,370 +385,403 @@ export function MapScreen() {
 
   function resetMap() {
     setSearch('');
+    setFilter('Tất cả');
     setActiveId(null);
     focusOnNextFix.current = false;
 
     mapRef.current?.animateToRegion(VIETNAM_REGION, 600);
   }
 
+  function openPoi(poi: Poi) {
+    navigation.navigate('PoiDetail', {
+      poiId: poi.id,
+      origin: 'manual',
+    });
+  }
+
+  function listenToPoi(poi: Poi) {
+    navigation.navigate('PoiDetail', {
+      poiId: poi.id,
+      autoplay: true,
+      origin: 'manual',
+    });
+  }
+
+  const gpsLabel =
+    permissionStatus === 'denied'
+      ? 'Quyền vị trí bị từ chối'
+      : location && isTracking
+        ? `Đang theo dõi · ±${Math.round(location.accuracy)} m`
+        : permissionStatus === 'granted'
+          ? 'Vị trí đã bật'
+          : 'Vị trí chưa bật';
+
   return (
-    <View style={styles.container}>
-      <View style={styles.mapLayer}>
-        <MapView
-          ref={mapRef}
-          style={styles.map}
-          initialRegion={VIETNAM_REGION}
-          mapType={mapType}
-          showsCompass
-          showsScale={false}
-          showsUserLocation={permissionStatus === 'granted'}
-          toolbarEnabled={false}
-          accessibilityLabel="Bản đồ các điểm thuyết minh"
-        >
-          {filteredPois.map((poi) => (
-            <Marker
-              key={poi.id}
-              coordinate={{
-                latitude: poi.latitude,
-                longitude: poi.longitude,
-              }}
-              title={poi.name.vi}
-              description={poi.description.vi}
-              pinColor={
-                poi.id === activeId
-                  ? colors.primary
-                  : colors.teal
-              }
-              onPress={() => focusPoi(poi)}
-            />
-          ))}
-        </MapView>
-      </View>
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <View style={styles.container}>
+        <View style={styles.mapLayer}>
+          <MapView
+            ref={mapRef}
+            style={styles.map}
+            initialRegion={VIETNAM_REGION}
+            mapType={mapType}
+            showsCompass={false}
+            showsScale={false}
+            showsUserLocation={permissionStatus === 'granted'}
+            toolbarEnabled={false}
+            accessibilityLabel="Bản đồ các điểm thuyết minh"
+          >
+            {filteredPois.map((poi) => {
+              const selected = selectedPoi?.id === poi.id;
 
-      <View style={styles.topPanel}>
-        <Text style={styles.eyebrow}>
-          GO TO HORIZON · AUDIO GUIDE
-        </Text>
-
-        <Text style={styles.heading}>
-          Khám phá quanh bạn
-        </Text>
-
-        <View style={styles.searchRow}>
-          <Text style={styles.searchIcon}>⌕</Text>
-
-          <TextInput
-            value={search}
-            onChangeText={(value) => {
-              setSearch(value);
-              setActiveId(null);
-            }}
-            placeholder="Tìm địa điểm thuyết minh..."
-            placeholderTextColor={colors.muted}
-            style={styles.searchInput}
-            accessibilityLabel="Tìm điểm đến"
-          />
-
-          {search.length > 0 && (
-            <Pressable
-              onPress={() => setSearch('')}
-              accessibilityLabel="Xóa tìm kiếm"
-            >
-              <Text style={styles.clear}>×</Text>
-            </Pressable>
-          )}
+              return (
+                <Marker
+                  key={poi.id}
+                  coordinate={{
+                    latitude: poi.latitude,
+                    longitude: poi.longitude,
+                  }}
+                  title={poi.name.vi}
+                  description={poi.description.vi}
+                  onPress={() => focusPoi(poi)}
+                  tracksViewChanges={false}
+                >
+                  <View style={[styles.markerRing, selected && styles.markerRingSelected]}>
+                    <View style={[styles.marker, selected && styles.markerSelected]}>
+                      <Text style={styles.markerText}>♬</Text>
+                    </View>
+                  </View>
+                </Marker>
+              );
+            })}
+          </MapView>
         </View>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.chipScroll}
-        >
-          <Pressable
-            style={styles.chip}
-            onPress={resetMap}
-          >
-            <Text style={styles.chipText}>
-              ↗ Toàn Việt Nam
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={[
-              styles.chip,
-              permissionStatus === 'granted' &&
-                styles.locationChip,
-            ]}
-            onPress={() => {
-              void locateMe();
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Định vị vị trí hiện tại"
-          >
-            <Text
-              style={[
-                styles.chipText,
-                permissionStatus === 'granted' &&
-                  styles.locationChipText,
-              ]}
-            >
-              {isLocationLoading
-                ? '◌ Đang xin quyền...'
-                : location
-                  ? '◎ Vị trí của tôi'
-                  : '◎ Bật GPS'}
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={styles.chip}
-            onPress={() =>
-              setMapType((type) =>
-                type === 'standard'
-                  ? 'satellite'
-                  : 'standard',
-              )
-            }
-          >
-            <Text style={styles.chipText}>
-              {mapType === 'standard'
-                ? '◈ Vệ tinh'
-                : '▧ Bản đồ'}
-            </Text>
-          </Pressable>
-
-          {__DEV__ && (
-            <Pressable
-              style={styles.chip}
-              onPress={() => {
-                setDemoArrival(true);
-                setArrivalPoiId(pois[0]?.id ?? null);
+        <View style={styles.topSearchArea}>
+          <View style={styles.searchCard}>
+            <Text style={styles.searchIcon}>⌕</Text>
+            <TextInput
+              value={search}
+              onChangeText={(value) => {
+                setSearch(value);
+                setActiveId(null);
               }}
-              accessibilityLabel="Thử giao diện gợi ý, không sử dụng GPS thật"
-            >
-              <Text style={styles.chipText}>
-                ⚗ Thử gợi ý
-              </Text>
-            </Pressable>
-          )}
-        </ScrollView>
+              placeholder="Tìm một miền di sản…"
+              placeholderTextColor={colors.muted}
+              style={styles.searchInput}
+              accessibilityLabel="Tìm địa điểm"
+            />
 
-        {permissionStatus === 'granted' && (
-          <Text style={styles.gpsStatus}>
-            {location
-              ? `● GPS ${
-                  isTracking
-                    ? 'đang cập nhật'
-                    : 'đã cấp quyền'
-                } · Sai số ±${Math.round(
-                  location.accuracy,
-                )} m`
-              : '◌ Đang xác định vị trí hiện tại...'}
-          </Text>
-        )}
-
-        <Text style={styles.contentStatus}>
-          {isContentLoading
-            ? '◌ Đang tải Content Layer…'
-            : `▣ SQLite Offline · ${pois.length} POI`}
-        </Text>
-
-        {contentError && (
-          <Text style={styles.contentError}>
-            {contentError}
-          </Text>
-        )}
-
-        {locationError && (
-          <View style={styles.errorRow}>
-            <Text style={styles.errorText}>
-              {locationError}
-            </Text>
-
-            {permissionStatus === 'denied' && (
+            {search.length > 0 && (
               <Pressable
-                onPress={() => {
-                  void Linking.openSettings();
-                }}
+                onPress={() => setSearch('')}
+                accessibilityLabel="Xóa tìm kiếm"
+                style={styles.clearButton}
               >
-                <Text style={styles.settingsLink}>
-                  Cài đặt
-                </Text>
+                <Text style={styles.clearText}>×</Text>
               </Pressable>
             )}
           </View>
-        )}
-      </View>
 
-      <View style={styles.bottomPanel}>
-        {arrivalPoi && (
-          <View style={styles.arrivalBanner}>
-            <View style={styles.arrivalHeader}>
-              <Text style={styles.arrivalLabel}>
-                {demoArrival
-                  ? '⚗ BẢN XEM TRƯỚC · KHÔNG DÙNG GPS'
-                  : '✦ BẠN ĐÃ ĐẾN GẦN MỘT ĐIỂM THUYẾT MINH'}
-              </Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterRow}
+          >
+            {FILTERS.map((item) => {
+              const selected = filter === item;
 
-              <Pressable
-                onPress={() =>
-                  setArrivalPoiId(null)
-                }
-                accessibilityLabel="Ẩn gợi ý"
-              >
-                <Text style={styles.close}>×</Text>
-              </Pressable>
-            </View>
-
-            <Text style={styles.arrivalTitle}>
-              {arrivalPoi.name.vi}
-            </Text>
-
-            <View style={styles.arrivalActions}>
-              <Text style={styles.arrivalDistance}>
-                {!demoArrival && location
-                  ? `Cách bạn ${formatDistance(
-                      evaluatePoi(
-                        location,
-                        arrivalPoi,
-                      ).distanceMeters,
-                    )}`
-                  : 'Giao diện minh họa'}
-              </Text>
-
-              <Pressable
-                style={styles.arrivalCta}
-                onPress={() => {
-                  setArrivalPoiId(null);
-                  navigation.navigate('PoiDetail', {
-                    poiId: arrivalPoi.id,
-                  });
-                }}
-              >
-                <Text style={styles.arrivalCtaText}>
-                  Xem thuyết minh →
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-        )}
-
-        {activePoi ? (
-          <View>
-            <View style={styles.topLine}>
-              <Text style={styles.overline}>
-                ĐIỂM THUYẾT MINH
-              </Text>
-
-              <Pressable
-                onPress={() => setActiveId(null)}
-                accessibilityLabel="Đóng thông tin"
-              >
-                <Text style={styles.close}>×</Text>
-              </Pressable>
-            </View>
-
-            <Text style={styles.poiTitle}>
-              {activePoi.name.vi}
-            </Text>
-
-            <Text
-              style={styles.poiDescription}
-              numberOfLines={2}
-            >
-              {activePoi.description.vi}
-            </Text>
-
-            <View style={styles.footerRow}>
-              <Text style={styles.radius}>
-                {activeResult
-                  ? `◎ Cách bạn ${formatDistance(
-                      activeResult.distanceMeters,
-                    )} · `
-                  : ''}
-                Bán kính {activePoi.radiusMeters} m
-              </Text>
-
-              <Pressable
-                style={styles.cta}
-                onPress={() =>
-                  navigation.navigate('PoiDetail', {
-                    poiId: activePoi.id,
-                  })
-                }
-              >
-                <Text style={styles.ctaText}>
-                  Khám phá →
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-        ) : (
-          <View>
-            <Text style={styles.overline}>
-              BẢN ĐỒ TRI THỨC
-            </Text>
-
-            <Text style={styles.poiTitle}>
-              {location && nearestRelevant
-                ? `Gần ${nearestRelevant.poi.name.vi}`
-                : `${filteredPois.length} địa điểm thuyết minh`}
-            </Text>
-
-            <Text style={styles.poiDescription}>
-              {location && nearestRelevant
-                ? `${
-                    nearestRelevant.result.state ===
-                    'inside'
-                      ? 'Bạn đang trong khu vực'
-                      : 'Địa điểm gần bạn'
-                  } · ${formatDistance(
-                    nearestRelevant.result
-                      .distanceMeters,
-                  )}`
-                : filteredPois.length
-                  ? 'Chọn điểm đến hoặc bật GPS để xem khoảng cách thực tế.'
-                  : 'Không tìm thấy địa điểm phù hợp.'}
-            </Text>
-
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.poiScroll}
-            >
-              {filteredPois.map((poi) => (
+              return (
                 <Pressable
-                  key={poi.id}
-                  style={styles.poiPill}
-                  onPress={() => focusPoi(poi)}
+                  key={item}
+                  onPress={() => {
+                    setFilter(item);
+                    setActiveId(null);
+                  }}
+                  style={({ pressed }) => [
+                    styles.filterChip,
+                    selected && styles.filterChipActive,
+                    pressed && styles.pressed,
+                  ]}
                 >
-                  <Text style={styles.poiPillText}>
-                    {poi.name.vi}
-                    {location
-                      ? ` · ${formatDistance(
-                          evaluatePoi(
-                            location,
-                            poi,
-                          ).distanceMeters,
-                        )}`
-                      : ''}{' '}
-                    ↗
+                  <Text
+                    style={[
+                      styles.filterChipText,
+                      selected && styles.filterChipTextActive,
+                    ]}
+                  >
+                    {item}
                   </Text>
                 </Pressable>
-              ))}
-            </ScrollView>
+              );
+            })}
+          </ScrollView>
+
+          {search.length > 0 && (
+            <View style={styles.searchResults}>
+              {filteredPois.length > 0 ? (
+                filteredPois.slice(0, 4).map((poi) => (
+                  <Pressable
+                    key={poi.id}
+                    onPress={() => focusPoi(poi)}
+                    style={({ pressed }) => [
+                      styles.searchResult,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <View style={styles.searchResultCopy}>
+                      <Text style={styles.searchResultTitle}>{poi.name.vi}</Text>
+                      <Text style={styles.searchResultMeta}>
+                        {categoryForPoi(poi)}
+                        {location
+                          ? ` · ${formatDistance(
+                              evaluatePoi(location, poi).distanceMeters,
+                            )}`
+                          : ''}
+                      </Text>
+                    </View>
+                    <Text style={styles.searchResultArrow}>→</Text>
+                  </Pressable>
+                ))
+              ) : (
+                <Text style={styles.noResult}>
+                  Không tìm thấy địa điểm. Thử từ khóa khác.
+                </Text>
+              )}
+            </View>
+          )}
+        </View>
+
+        <View style={styles.mapTools}>
+          <Pressable
+            onPress={resetMap}
+            accessibilityLabel="Tổng quan Việt Nam"
+            style={({ pressed }) => [
+              styles.toolButton,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={styles.toolIcon}>◎</Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => {
+              void locateMe();
+            }}
+            accessibilityLabel="Vị trí của tôi"
+            style={({ pressed }) => [
+              styles.toolButton,
+              permissionStatus === 'granted' && styles.toolButtonActive,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text
+              style={[
+                styles.toolIcon,
+                permissionStatus === 'granted' && styles.toolIconActive,
+              ]}
+            >
+              ⌖
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() =>
+              setMapType((type) =>
+                type === 'standard' ? 'satellite' : 'standard',
+              )
+            }
+            accessibilityLabel="Đổi lớp bản đồ"
+            style={({ pressed }) => [
+              styles.toolButton,
+              mapType === 'satellite' && styles.toolButtonActive,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text
+              style={[
+                styles.toolIcon,
+                mapType === 'satellite' && styles.toolIconActive,
+              ]}
+            >
+              ◫
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => navigation.navigate('QrScanner')}
+            accessibilityLabel="Quét QR"
+            style={({ pressed }) => [
+              styles.toolButton,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={styles.toolIcon}>▦</Text>
+          </Pressable>
+        </View>
+
+        {arrivalPoi && (
+          <View style={styles.geofenceAlert}>
+            <View style={styles.geofenceCopy}>
+              <Text style={styles.geofenceEyebrow}>
+                {demoArrival
+                  ? 'BẢN XEM TRƯỚC · KHÔNG DÙNG GPS'
+                  : 'BẠN ĐANG ĐẾN GẦN MỘT CÂU CHUYỆN'}
+              </Text>
+              <Text style={styles.geofenceTitle}>{arrivalPoi.name.vi}</Text>
+              <Text style={styles.geofenceText}>
+                {demoArrival || !location
+                  ? 'Giao diện minh họa vùng thuyết minh.'
+                  : `Cách bạn ${formatDistance(
+                      evaluatePoi(location, arrivalPoi).distanceMeters,
+                    )}.`}
+              </Text>
+            </View>
+
+            <Pressable
+              onPress={() => setArrivalPoiId(null)}
+              accessibilityLabel="Ẩn thông báo"
+              style={styles.alertClose}
+            >
+              <Text style={styles.alertCloseText}>×</Text>
+            </Pressable>
           </View>
         )}
+
+        <View style={styles.bottomCard}>
+          <View style={styles.statusRow}>
+            <View style={styles.statusBadge}>
+              <View
+                style={[
+                  styles.statusDot,
+                  permissionStatus === 'denied' && styles.statusDotError,
+                ]}
+              />
+              <Text style={styles.statusText}>{gpsLabel}</Text>
+            </View>
+
+            <Text style={styles.offlineText}>
+              {isContentLoading
+                ? 'Đang tải nội dung…'
+                : `Offline · ${pois.length} POI`}
+            </Text>
+          </View>
+
+          {selectedPoi ? (
+            <>
+              <View style={styles.placeRow}>
+                <View style={styles.placeThumbnail}>
+                  <Text style={styles.thumbnailMark}>☼</Text>
+                </View>
+
+                <View style={styles.placeCopy}>
+                  <Text style={styles.placeEyebrow}>
+                    {metaForPoi(selectedPoi).category}
+                  </Text>
+                  <Text style={styles.placeTitle} numberOfLines={1}>
+                    {selectedPoi.name.vi}
+                  </Text>
+                  <Text style={styles.placeMeta}>
+                    {selectedResult
+                      ? `${formatDistance(selectedResult.distanceMeters)} · `
+                      : ''}
+                    {metaForPoi(selectedPoi).duration}
+                  </Text>
+                </View>
+              </View>
+
+              <Text style={styles.placeDescription} numberOfLines={2}>
+                {selectedPoi.description.vi}
+              </Text>
+
+              <View style={styles.actions}>
+                <Pressable
+                  onPress={() => openPoi(selectedPoi)}
+                  style={({ pressed }) => [
+                    styles.primaryButton,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.primaryButtonText}>Khám phá địa điểm</Text>
+                  <Text style={styles.primaryButtonArrow}>→</Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => listenToPoi(selectedPoi)}
+                  style={({ pressed }) => [
+                    styles.secondaryButton,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.secondaryButtonText}>▶ Nghe</Text>
+                </Pressable>
+              </View>
+
+              {__DEV__ && (
+                <Pressable
+                  onPress={() => {
+                    setDemoArrival(true);
+                    setArrivalPoiId(selectedPoi.id);
+                  }}
+                  style={({ pressed }) => [
+                    styles.devAction,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.devActionText}>
+                    Mô phỏng đi vào vùng thuyết minh
+                  </Text>
+                </Pressable>
+              )}
+            </>
+          ) : (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>Chưa có địa điểm phù hợp</Text>
+              <Text style={styles.emptyText}>
+                Thử đổi bộ lọc hoặc từ khóa tìm kiếm.
+              </Text>
+            </View>
+          )}
+
+          {contentError && (
+            <Text style={styles.contentError}>{contentError}</Text>
+          )}
+
+          {locationError && (
+            <View style={styles.locationErrorRow}>
+              <Text style={styles.locationErrorText}>{locationError}</Text>
+
+              {permissionStatus === 'denied' && (
+                <Pressable
+                  onPress={() => {
+                    void Linking.openSettings();
+                  }}
+                >
+                  <Text style={styles.settingsLink}>Mở cài đặt</Text>
+                </Pressable>
+              )}
+            </View>
+          )}
+        </View>
+
+        <Text style={styles.disclaimer}>
+          Bản đồ thật · Nội dung có sẵn ngoại tuyến
+        </Text>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safe: {
+    flex: 1,
+    backgroundColor: '#E2E4D4',
+  },
+
   container: {
     flex: 1,
-    backgroundColor: colors.background,
     position: 'relative',
+    backgroundColor: '#E2E4D4',
   },
 
   mapLayer: {
@@ -701,7 +790,6 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     left: 0,
-    zIndex: 0,
     overflow: 'hidden',
   },
 
@@ -711,285 +799,489 @@ const styles = StyleSheet.create({
     height: '100%',
   },
 
-  topPanel: {
+  topSearchArea: {
     position: 'absolute',
-    top: 12,
-    left: 12,
-    right: 12,
-    backgroundColor: 'rgba(255,253,249,0.98)',
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 14,
-    elevation: 5,
+    top: 16,
+    left: 16,
+    right: 72,
     zIndex: 20,
   },
 
-  eyebrow: {
-    fontSize: 10,
-    letterSpacing: 1.7,
-    color: colors.primary,
-    fontWeight: '800',
-  },
-
-  heading: {
-    fontSize: 23,
-    fontWeight: '800',
-    color: colors.text,
-    marginTop: 5,
-    marginBottom: 12,
-  },
-
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.background,
-    borderRadius: radius.md,
+  searchCard: {
+    height: 46,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,253,248,0.97)',
     borderWidth: 1,
     borderColor: colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 12,
+    shadowColor: '#123C3A',
+    shadowOpacity: 0.07,
+    shadowRadius: 16,
+    elevation: 4,
   },
 
   searchIcon: {
     color: colors.teal,
-    fontSize: 25,
+    fontSize: 22,
     marginRight: 8,
+    marginTop: -2,
   },
 
   searchInput: {
     flex: 1,
-    minHeight: 45,
+    height: '100%',
     color: colors.text,
-    fontSize: 14,
-  },
-
-  clear: {
-    color: colors.muted,
-    fontSize: 24,
-    paddingHorizontal: 4,
-  },
-
-  chipScroll: {
-    marginTop: 11,
-    flexGrow: 0,
-  },
-
-  chip: {
-    backgroundColor: '#F0E8DB',
-    paddingVertical: 9,
-    paddingHorizontal: 13,
-    borderRadius: 99,
-    marginRight: 8,
-  },
-
-  chipText: {
-    color: colors.text,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-
-  locationChip: {
-    backgroundColor: colors.teal,
-  },
-
-  locationChipText: {
-    color: '#fff',
-  },
-
-  gpsStatus: {
-    color: colors.teal,
     fontSize: 11,
-    marginTop: 10,
+  },
+
+  clearButton: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  clearText: {
+    color: colors.muted,
+    fontSize: 22,
+  },
+
+  filterRow: {
+    paddingTop: 9,
+    paddingBottom: 2,
+    gap: 6,
+  },
+
+  filterChip: {
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: 'rgba(255,253,248,0.94)',
+  },
+
+  filterChipActive: {
+    backgroundColor: colors.teal,
+    borderColor: colors.teal,
+  },
+
+  filterChipText: {
+    color: colors.text,
+    fontSize: 9,
     fontWeight: '600',
   },
 
-  contentStatus: {
-    color: colors.muted,
-    fontSize: 10,
-    marginTop: 6,
+  filterChipTextActive: {
+    color: colors.surface,
   },
 
-  contentError: {
-    color: '#A84836',
-    fontSize: 10,
-    marginTop: 4,
+  searchResults: {
+    marginTop: 8,
+    borderRadius: 6,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
+    shadowColor: '#123C3A',
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 5,
   },
 
-  errorRow: {
+  searchResult: {
+    minHeight: 50,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 9,
+    justifyContent: 'space-between',
+  },
+
+  searchResultCopy: {
+    flex: 1,
+  },
+
+  searchResultTitle: {
+    color: colors.text,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+
+  searchResultMeta: {
+    marginTop: 3,
+    color: colors.muted,
+    fontSize: 8,
+  },
+
+  searchResultArrow: {
+    color: colors.teal,
+    fontSize: 17,
+    marginLeft: 12,
+  },
+
+  noResult: {
+    padding: 14,
+    color: colors.muted,
+    fontSize: 9,
+    lineHeight: 15,
+  },
+
+  mapTools: {
+    position: 'absolute',
+    top: 16,
+    right: 14,
+    zIndex: 21,
     gap: 8,
   },
 
-  errorText: {
+  toolButton: {
+    width: 43,
+    height: 43,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: 'rgba(255,253,248,0.97)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#123C3A',
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+
+  toolButtonActive: {
+    backgroundColor: colors.teal,
+    borderColor: colors.teal,
+  },
+
+  toolIcon: {
+    color: colors.teal,
+    fontSize: 19,
+    fontWeight: '700',
+  },
+
+  toolIconActive: {
+    color: colors.surface,
+  },
+
+  markerRing: {
+    width: 43,
+    height: 43,
+    borderRadius: 99,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(18,60,58,0.10)',
+  },
+
+  markerRingSelected: {
+    backgroundColor: 'rgba(199,101,73,0.20)',
+  },
+
+  marker: {
+    width: 31,
+    height: 31,
+    borderRadius: 99,
+    backgroundColor: colors.teal,
+    borderWidth: 3,
+    borderColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  markerSelected: {
+    backgroundColor: colors.primary,
+  },
+
+  markerText: {
+    color: colors.surface,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+
+  geofenceAlert: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 234,
+    zIndex: 22,
+    padding: 14,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: '#B7D9CB',
+    backgroundColor: '#F3F8F4',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    shadowColor: '#123C3A',
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 5,
+  },
+
+  geofenceCopy: {
     flex: 1,
-    color: colors.primaryDark,
-    fontSize: 11,
-    lineHeight: 16,
+  },
+
+  geofenceEyebrow: {
+    color: colors.teal,
+    fontSize: 7,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+
+  geofenceTitle: {
+    marginTop: 5,
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+
+  geofenceText: {
+    marginTop: 4,
+    color: colors.muted,
+    fontSize: 9,
+    lineHeight: 15,
+  },
+
+  alertClose: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  alertCloseText: {
+    color: colors.muted,
+    fontSize: 20,
+  },
+
+  bottomCard: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 18,
+    zIndex: 20,
+    padding: 16,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: 'rgba(255,253,248,0.98)',
+    shadowColor: '#123C3A',
+    shadowOpacity: 0.09,
+    shadowRadius: 20,
+    elevation: 7,
+  },
+
+  statusRow: {
+    minHeight: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 4,
+    backgroundColor: colors.green,
+  },
+
+  statusDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 99,
+    backgroundColor: '#658B70',
+  },
+
+  statusDotError: {
+    backgroundColor: colors.error,
+  },
+
+  statusText: {
+    color: colors.teal,
+    fontSize: 8,
+    fontWeight: '700',
+  },
+
+  offlineText: {
+    color: colors.muted,
+    fontSize: 7.5,
+    fontWeight: '600',
+  },
+
+  placeRow: {
+    marginTop: 13,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 13,
+  },
+
+  placeThumbnail: {
+    width: 59,
+    height: 59,
+    borderRadius: 5,
+    backgroundColor: colors.sand,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  thumbnailMark: {
+    color: colors.teal,
+    fontSize: 25,
+  },
+
+  placeCopy: {
+    flex: 1,
+  },
+
+  placeEyebrow: {
+    color: colors.primary,
+    fontSize: 7,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+
+  placeTitle: {
+    marginTop: 4,
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: -0.35,
+  },
+
+  placeMeta: {
+    marginTop: 4,
+    color: colors.muted,
+    fontSize: 8.5,
+  },
+
+  placeDescription: {
+    marginTop: 10,
+    color: colors.muted,
+    fontSize: 9,
+    lineHeight: 15,
+  },
+
+  actions: {
+    marginTop: 12,
+    flexDirection: 'row',
+    gap: 8,
+  },
+
+  primaryButton: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 5,
+    paddingHorizontal: 13,
+    backgroundColor: colors.teal,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  primaryButtonText: {
+    color: colors.surface,
+    fontSize: 9.5,
+    fontWeight: '800',
+  },
+
+  primaryButtonArrow: {
+    color: colors.surface,
+    fontSize: 17,
+  },
+
+  secondaryButton: {
+    minWidth: 89,
+    minHeight: 42,
+    borderRadius: 5,
+    paddingHorizontal: 14,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  secondaryButtonText: {
+    color: colors.teal,
+    fontSize: 9.5,
+    fontWeight: '800',
+  },
+
+  devAction: {
+    alignSelf: 'flex-start',
+    marginTop: 9,
+    paddingVertical: 2,
+  },
+
+  devActionText: {
+    color: colors.teal,
+    fontSize: 7.5,
+    textDecorationLine: 'underline',
+  },
+
+  emptyState: {
+    paddingVertical: 20,
+  },
+
+  emptyTitle: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+
+  emptyText: {
+    marginTop: 5,
+    color: colors.muted,
+    fontSize: 9,
+  },
+
+  contentError: {
+    marginTop: 9,
+    color: colors.error,
+    fontSize: 8,
+    lineHeight: 13,
+  },
+
+  locationErrorRow: {
+    marginTop: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+
+  locationErrorText: {
+    flex: 1,
+    color: colors.error,
+    fontSize: 8,
+    lineHeight: 13,
   },
 
   settingsLink: {
     color: colors.teal,
+    fontSize: 8,
     fontWeight: '800',
-    fontSize: 11,
   },
 
-  bottomPanel: {
+  disclaimer: {
     position: 'absolute',
-    bottom: 12,
-    left: 12,
-    right: 12,
-    padding: 16,
-    borderRadius: radius.lg,
-    backgroundColor: 'rgba(255,253,249,0.98)',
-    borderWidth: 1,
-    borderColor: colors.border,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 6,
-    zIndex: 20,
+    right: 18,
+    bottom: 4,
+    color: 'rgba(24,48,46,0.55)',
+    fontSize: 6.5,
+    zIndex: 19,
   },
 
-  topLine: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-
-  overline: {
-    color: colors.primary,
-    fontWeight: '800',
-    letterSpacing: 1.2,
-    fontSize: 10,
-  },
-
-  close: {
-    color: colors.muted,
-    fontSize: 24,
-    lineHeight: 25,
-  },
-
-  poiTitle: {
-    color: colors.text,
-    fontSize: 20,
-    fontWeight: '800',
-    marginTop: 5,
-  },
-
-  poiDescription: {
-    color: colors.muted,
-    fontSize: 12.5,
-    lineHeight: 18,
-    marginTop: 6,
-  },
-
-  footerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 14,
-    gap: 8,
-  },
-
-  radius: {
-    color: colors.teal,
-    fontSize: 11,
-    flexShrink: 1,
-  },
-
-  cta: {
-    backgroundColor: colors.primary,
-    borderRadius: 11,
-    paddingVertical: 11,
-    paddingHorizontal: 15,
-  },
-
-  ctaText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-
-  poiScroll: {
-    marginTop: 12,
-    flexGrow: 0,
-  },
-
-  poiPill: {
-    borderColor: colors.border,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 12,
-    marginRight: 8,
-  },
-
-  poiPillText: {
-    color: colors.text,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-
-  arrivalBanner: {
-    borderRadius: 13,
-    backgroundColor: '#E8F2EC',
-    padding: 11,
-    marginBottom: 13,
-    borderWidth: 1,
-    borderColor: '#B7D9CB',
-  },
-
-  arrivalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 4,
-  },
-
-  arrivalLabel: {
-    color: colors.teal,
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-    flexShrink: 1,
-  },
-
-  arrivalTitle: {
-    color: colors.text,
-    fontWeight: '800',
-    fontSize: 16,
-    marginTop: 4,
-  },
-
-  arrivalActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 8,
-  },
-
-  arrivalDistance: {
-    color: colors.muted,
-    fontSize: 11,
-    flexShrink: 1,
-  },
-
-  arrivalCta: {
-    backgroundColor: colors.teal,
-    borderRadius: 9,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-  },
-
-  arrivalCtaText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '800',
+  pressed: {
+    opacity: 0.72,
   },
 });
