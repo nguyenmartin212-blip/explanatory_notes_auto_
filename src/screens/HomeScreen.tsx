@@ -496,7 +496,11 @@ const styles = StyleSheet.create({
   },
 
   heroShade: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     borderRadius: 6,
     backgroundColor: 'rgba(8, 30, 26, 0.53)',
   },
@@ -677,7 +681,11 @@ const styles = StyleSheet.create({
   },
 
   imageShade: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     backgroundColor: 'rgba(12, 42, 38, 0.10)',
   },
 
