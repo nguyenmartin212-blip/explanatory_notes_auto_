@@ -1,12 +1,18 @@
 export const colors = {
-  background: '#F7F2E8',
-  surface: '#FFFFFF',
-  primary: '#C95E3F',
-  primaryDark: '#8E3E2B',
-  teal: '#1F6B68',
-  text: '#163534',
-  muted: '#71807C',
-  border: '#E7DDCF',
+  // Go to Horizon — editorial heritage palette from the Figma Make reference.
+  background: '#F4F0E6',
+  surface: '#FFFDF8',
+  primary: '#C76549',
+  primaryDark: '#A64A3A',
+  teal: '#123C3A',
+  text: '#18302E',
+  muted: '#747B76',
+  border: '#DDD5C8',
+
+  // Extra semantic surfaces. Existing screens can keep using the original keys above.
+  sand: '#E9DDC9',
+  green: '#DCE9E1',
+  error: '#A64A3A',
 } as const;
 
 export const spacing = {
