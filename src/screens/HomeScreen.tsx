@@ -17,7 +17,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useOfflinePois } from '@/features/content';
 import type { Poi } from '@/features/poi';
 import type { MainTabParamList, RootStackParamList } from '@/navigation';
-import { colors, radius, spacing } from '@/theme';
+import { colors, spacing } from '@/theme';
 
 type HomeTabNavigation = BottomTabNavigationProp<MainTabParamList, 'Home'>;
 type RootNavigation = NativeStackNavigationProp<RootStackParamList>;

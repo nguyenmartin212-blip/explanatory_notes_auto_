@@ -128,7 +128,7 @@ export function MapScreen() {
   const [permissionStatus, setPermissionStatus] =
     useState<PermissionState>('not-requested');
   const [isTracking, setIsTracking] = useState(false);
-  const [isLocationLoading, setIsLocationLoading] = useState(false);
+  const [, setIsLocationLoading] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
 
   const [search, setSearch] = useState('');
@@ -535,8 +535,8 @@ export function MapScreen() {
                         {categoryForPoi(poi)}
                         {location
                           ? ` · ${formatDistance(
-                              evaluatePoi(location, poi).distanceMeters,
-                            )}`
+                            evaluatePoi(location, poi).distanceMeters,
+                          )}`
                           : ''}
                       </Text>
                     </View>
@@ -633,8 +633,8 @@ export function MapScreen() {
                 {demoArrival || !location
                   ? 'Giao diện minh họa vùng thuyết minh.'
                   : `Cách bạn ${formatDistance(
-                      evaluatePoi(location, arrivalPoi).distanceMeters,
-                    )}.`}
+                    evaluatePoi(location, arrivalPoi).distanceMeters,
+                  )}.`}
               </Text>
             </View>
 
