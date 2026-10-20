@@ -215,15 +215,31 @@ def test_startup_order_and_readiness(calls):
         (settings.static_dir / "hello.txt").write_text("hi")
         assert client.get("/static/hello.txt").text == "hi"
 
-        paths = {route.path for route in app.routes}
-        for router in ROUTERS:
-            assert router.prefix and len(ROUTERS) == 10
-            assert any(p.startswith(router.prefix) or p == router.prefix for p in paths) or True
+        # app.openapi() lists every mounted path in all FastAPI versions
+        # (newer ones keep included routers nested, so app.routes has no flat `.path`).
+        paths = set(app.openapi()["paths"])
+        for expected in (
+            "/health",
+            "/poi/load-all",
+            "/poi/nearby",
+            "/pois",
+            "/audio/tts",
+            "/audio/pack-manifest",
+            "/admin/auth/login",
+            "/admin/audio-tasks/stream",
+            "/localizations/prepare-hotset",
+            "/localizations/on-demand",
+            "/localizations/warmup",
+            "/api/v1/ui-bundles/{locale}",
+        ):
+            assert expected in paths, expected
 
 
 def test_ten_routers_registered():
-    prefixes = {r.prefix for r in ROUTERS}
-    assert len(ROUTERS) == 10 and len(prefixes) == 10
+    # `content` and `localization` have no common prefix (their paths are full), so the
+    # routers are told apart by their tag, not by prefix.
+    tags = {tag for r in ROUTERS for tag in r.tags}
+    assert len(ROUTERS) == 10 and len(tags) == 10
 
 
 def test_not_ready_when_redis_down(calls):
