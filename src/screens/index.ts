@@ -1,5 +1,5 @@
 export * from './HomeScreen';
-export * from './MapScreen';
+export { default as MapScreen } from './MapScreen';
 export * from './PoiDetailScreen';
 export * from './QrScannerScreen';
 export * from './ItineraryScreen';
