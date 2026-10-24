@@ -116,7 +116,7 @@ function metaForPoi(poi: Poi) {
   };
 }
 
-export function MapScreen() {
+export default function MapScreen() {
   const mapRef = useRef<MapView>(null);
   const focusOnNextFix = useRef(false);
   const geofenceState = useRef(createGeofenceRuntimeState());
@@ -142,6 +142,7 @@ export function MapScreen() {
     pois,
     isLoading: isContentLoading,
     error: contentError,
+    source: contentSource,
   } = useOfflinePois();
 
   const requestLocationPermission = useCallback(async () => {
@@ -218,7 +219,7 @@ export function MapScreen() {
           {
             accuracy: Location.Accuracy.Balanced,
             distanceInterval: 5,
-            timeInterval: 4_000,
+            timeInterval: 5_000,
           },
           (position: Location.LocationObject) => {
             if (!cancelled) {
@@ -306,8 +307,8 @@ export function MapScreen() {
       geofenceState.current,
       location.timestamp,
       {
-        debounceMs: 1_500,
-        cooldownMs: 10 * 60 * 1_000,
+        debounceMs: 3_000,
+        cooldownMs: 5 * 60 * 1_000,
         exitMultiplier: 1.25,
       },
     );
@@ -663,7 +664,9 @@ export function MapScreen() {
             <Text style={styles.offlineText}>
               {isContentLoading
                 ? 'Đang tải nội dung…'
-                : `Offline · ${pois.length} POI`}
+                : contentSource === 'network'
+                  ? `Đã đồng bộ · ${pois.length} POI`
+                  : `Dữ liệu offline · ${pois.length} POI`}
             </Text>
           </View>
 
