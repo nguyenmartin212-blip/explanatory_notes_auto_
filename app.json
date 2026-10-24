@@ -4,6 +4,7 @@
     "slug": "explanatory-notes-auto",
     "version": "0.1.0",
     "orientation": "portrait",
+    "sdkVersion": "58.0.0",
     "userInterfaceStyle": "automatic",
     "assetBundlePatterns": [
       "**/*"
@@ -18,6 +19,16 @@
       "expo-status-bar",
       "expo-audio",
       "expo-sqlite"
-    ]
+    ],
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "name": "Explanatory Notes Auto",
+      "shortName": "NotesAuto",
+      "themeColor": "#007aff",
+      "backgroundColor": "#ffffff",
+      "display": "standalone",
+      "orientation": "portrait"
+    }
   }
 }
