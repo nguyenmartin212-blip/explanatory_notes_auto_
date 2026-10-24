@@ -1,3 +1,4 @@
 export * from './types';
 export * from './services/geofence.engine';
-export * from './services/foreground-geofence';
+export * from './services/geofence.runtime';
+export * from './services/visitor-exit';
