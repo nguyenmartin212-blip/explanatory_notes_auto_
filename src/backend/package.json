@@ -1,0 +1,25 @@
+{
+  "name": "explanatory-notes-auto-backend",
+  "version": "1.0.0",
+  "description": "Backend of Explanatory Notes Auto (Node.js / Express / MongoDB / Redis)",
+  "private": true,
+  "type": "module",
+  "main": "src/main.js",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "scripts": {
+    "start": "node src/main.js",
+    "dev": "node --watch src/main.js",
+    "seed:pois": "node scripts/seed-pois.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.19.2",
+    "google-translate-api-x": "^10.7.1",
+    "mongodb": "^6.8.0",
+    "node-edge-tts": "^1.2.8",
+    "redis": "^4.7.0"
+  }
+}
