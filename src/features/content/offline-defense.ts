@@ -1,4 +1,5 @@
 import type { Poi } from '@/features/poi';
+import { getPois } from '@/features/poi/api';
 import { getOfflinePois, replaceOfflinePois } from './database';
 
 /**
@@ -43,15 +44,6 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   });
 }
 
-async function fetchPoisFromNetwork(): Promise<Poi[]> {
-  const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
-  const response = await withTimeout(fetch(`${apiUrl}/pois`), REQUEST_TIMEOUT_MS);
-  if (!response.ok) throw new Error(`API request failed: ${response.status}`);
-  const data: unknown = await response.json();
-  if (!Array.isArray(data)) throw new Error('API response must be a POI array.');
-  return data as Poi[];
-}
-
 function touchLanguageShard(language: OfflineLanguage) {
   const now = Date.now();
   languageUsage = [
@@ -66,12 +58,22 @@ export async function loadPoisOfflineFirst(languageInput: string): Promise<Offli
   const language = normalizeLanguage(languageInput);
   touchLanguageShard(language);
   try {
-    const remotePois = await fetchPoisFromNetwork();
-    // Do not replace a useful local snapshot with a malformed/empty response.
+    const remotePois = await withTimeout(getPois(), REQUEST_TIMEOUT_MS);
     if (remotePois.length > 0) {
       await replaceOfflinePois(remotePois.slice(0, MAX_ITEMS_PER_LANG));
+      return { pois: remotePois, source: 'network', language };
     }
-    return { pois: remotePois, source: 'network', language };
+
+    const cached = await getOfflinePois();
+    if (cached.length > 0) {
+      return {
+        pois: cached,
+        source: 'sqlite',
+        language,
+        warning: 'Backend chưa có POI hoạt động; đang hiển thị dữ liệu đã lưu trên thiết bị.',
+      };
+    }
+    return { pois: [], source: 'network', language };
   } catch (error) {
     const cached = await getOfflinePois();
     if (cached.length > 0) {
