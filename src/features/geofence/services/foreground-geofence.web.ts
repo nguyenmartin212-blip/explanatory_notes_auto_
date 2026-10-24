@@ -3,21 +3,33 @@
 export interface WebGeofenceLocation {
   latitude: number;
   longitude: number;
+  accuracy: number;
+  timestamp: number;
 }
 
 class ForegroundGeofenceWebService {
   private watchId: number | null = null;
+  private lastEmittedAt = 0;
+  private readonly minimumIntervalMs = 5_000;
 
-  public startTracking(onLocationUpdate: (loc: WebGeofenceLocation) => void, onError?: (error: any) => void) {
+  public startTracking(
+    onLocationUpdate: (loc: WebGeofenceLocation) => void,
+    onError?: (error: GeolocationPositionError | Error) => void,
+  ) {
     if (typeof window === 'undefined' || !navigator.geolocation) {
-      console.warn('Geolocation is not supported by this browser.');
-      return;
+      onError?.(new Error('Geolocation is not supported by this browser.'));
+      return null;
     }
 
+    this.stopTracking();
+    this.lastEmittedAt = 0;
     this.watchId = navigator.geolocation.watchPosition(
       (position) => {
-        const { latitude, longitude } = position.coords;
-        onLocationUpdate({ latitude, longitude });
+        const now = Date.now();
+        if (now - this.lastEmittedAt < this.minimumIntervalMs) return;
+        this.lastEmittedAt = now;
+        const { latitude, longitude, accuracy } = position.coords;
+        onLocationUpdate({ latitude, longitude, accuracy, timestamp: position.timestamp });
       },
       (error) => {
         if (onError) onError(error);
@@ -28,6 +40,7 @@ class ForegroundGeofenceWebService {
         timeout: 20000,
       }
     );
+    return this.watchId;
   }
 
   public stopTracking() {
@@ -35,6 +48,7 @@ class ForegroundGeofenceWebService {
       navigator.geolocation.clearWatch(this.watchId);
       this.watchId = null;
     }
+    this.lastEmittedAt = 0;
   }
 }
 
