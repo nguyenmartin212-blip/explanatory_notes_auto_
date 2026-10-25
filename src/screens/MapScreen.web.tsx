@@ -12,6 +12,7 @@ import {
 import { foregroundGeofenceWeb } from '../features/geofence/services/foreground-geofence.web';
 import type { WebGeofenceLocation } from '../features/geofence/services/foreground-geofence.web';
 import { apiDelete, apiPost } from '../services/apiClient';
+import { getDistanceMeters } from '../utils/distance';
 
 type LanguageKey = 'vi' | 'en' | 'zh';
 type VietnamRegion = 'north' | 'central' | 'south';
@@ -27,6 +28,8 @@ type VisitorResponse = {
 const VISITOR_ID_KEY = 'visitor_visit_id';
 const VISITOR_POI_KEY = 'visitor_poi_id';
 const AUTO_EXIT_DEBOUNCE_MS = 10_000;
+// Backend (POST /api/visitors/itinerary) chỉ nhận tối đa 20 điểm dừng; vượt quá sẽ bị lỗi 422.
+const MAX_ROUTE_STOPS = 20;
 
 function createVisitId() {
   if (typeof window.crypto.randomUUID === 'function') {
@@ -50,6 +53,136 @@ function formatVisitTimestamp(value: string | null, language: LanguageKey) {
 
 function formatDistance(meters: number) {
   return meters < 1_000 ? `${Math.round(meters)} m` : `${(meters / 1_000).toFixed(1)} km`;
+}
+
+type RouteLeg = { poi: Poi; distanceFromPreviousMeters: number | null };
+
+function buildRouteLegs(routePois: Poi[]) {
+  let totalMeters = 0;
+  const legs: RouteLeg[] = routePois.map((poi, index) => {
+    const previous = routePois[index - 1];
+    const distanceFromPreviousMeters = previous ? getDistanceMeters(previous, poi) : null;
+    if (distanceFromPreviousMeters !== null) totalMeters += distanceFromPreviousMeters;
+    return { poi, distanceFromPreviousMeters };
+  });
+  return { legs, totalMeters };
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+type RoutePrintLabels = {
+  documentTitle: string;
+  stopsUnit: string;
+  totalDistance: string;
+  fromPrevious: string;
+  startPoint: string;
+  coordinates: string;
+  radius: string;
+  metersUnit: string;
+  note: string;
+  printedAt: string;
+};
+
+function buildRoutePrintHtml(
+  legs: RouteLeg[],
+  totalMeters: number,
+  language: LanguageKey,
+  labels: RoutePrintLabels,
+  printedAt: string,
+) {
+  const items = legs.map(({ poi, distanceFromPreviousMeters }, index) => {
+    const name = poi.name?.[language] || poi.name?.vi || poi.id;
+    const description = poi.description?.[language] || poi.description?.vi || '';
+    const mapUrl = poi.mapUrl && /^https?:\/\//i.test(poi.mapUrl)
+      ? poi.mapUrl
+      : `https://www.google.com/maps/search/?api=1&query=${poi.latitude},${poi.longitude}`;
+    const leg = distanceFromPreviousMeters === null
+      ? labels.startPoint
+      : `${labels.fromPrevious}: ${formatDistance(distanceFromPreviousMeters)}`;
+    return `<li>
+      <div class="num">${index + 1}</div>
+      <div class="body">
+        <h2>${escapeHtml(name)}</h2>
+        <p class="desc">${escapeHtml(description)}</p>
+        <p class="meta">${escapeHtml(leg)} · ${escapeHtml(labels.coordinates)}: ${poi.latitude}, ${poi.longitude} · ${escapeHtml(labels.radius)}: ${poi.radiusMeters} ${escapeHtml(labels.metersUnit)}</p>
+        <p class="link">${escapeHtml(mapUrl)}</p>
+      </div>
+    </li>`;
+  }).join('');
+
+  return `<!doctype html>
+<html lang="${language}">
+<head>
+<meta charset="utf-8">
+<title>${escapeHtml(labels.documentTitle)}</title>
+<style>
+  @page { margin: 16mm; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; color: #203548; margin: 0; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: #5b6f7d; font-size: 12px; margin: 0 0 18px; }
+  ol { list-style: none; margin: 0; padding: 0; }
+  li { display: flex; gap: 12px; padding: 12px 0; border-top: 1px solid #d9e4ec; break-inside: avoid; page-break-inside: avoid; }
+  .num { flex: none; width: 30px; height: 30px; border-radius: 50%; background: #3d9b62; color: #fff; font-weight: 700; text-align: center; line-height: 30px; }
+  h2 { font-size: 15px; margin: 0 0 4px; }
+  .desc { font-size: 12px; line-height: 1.5; margin: 0 0 4px; }
+  .meta { font-size: 11px; color: #5b6f7d; margin: 0 0 2px; }
+  .link { font-size: 10px; color: #5b6f7d; margin: 0; word-break: break-all; }
+  .total { margin-top: 14px; padding-top: 12px; border-top: 2px solid #203548; font-size: 13px; font-weight: 700; }
+  .note { font-size: 10px; color: #6d7f8b; margin-top: 6px; }
+</style>
+</head>
+<body>
+  <h1>${escapeHtml(labels.documentTitle)}</h1>
+  <p class="sub">${legs.length} ${escapeHtml(labels.stopsUnit)} · ${escapeHtml(labels.printedAt)}: ${escapeHtml(printedAt)}</p>
+  <ol>${items}</ol>
+  <p class="total">${escapeHtml(labels.totalDistance)}: ${formatDistance(totalMeters)}</p>
+  <p class="note">${escapeHtml(labels.note)}</p>
+</body>
+</html>`;
+}
+
+// In bằng iframe ẩn để không bị trình duyệt chặn popup.
+function printRouteDocument(html: string) {
+  if (typeof document === 'undefined') return false;
+  const frame = document.createElement('iframe');
+  frame.setAttribute('aria-hidden', 'true');
+  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+  document.body.appendChild(frame);
+
+  const frameWindow = frame.contentWindow;
+  const frameDocument = frame.contentDocument;
+  if (!frameWindow || !frameDocument) {
+    frame.remove();
+    return false;
+  }
+
+  const cleanup = () => {
+    if (frame.parentNode) frame.parentNode.removeChild(frame);
+  };
+
+  frameDocument.open();
+  frameDocument.write(html);
+  frameDocument.close();
+  // Gắn listener SAU document.open(): lệnh này xóa mọi listener đã gắn trên cửa sổ của iframe.
+  frameWindow.addEventListener('afterprint', () => window.setTimeout(cleanup, 500));
+  window.setTimeout(cleanup, 120_000);
+  window.setTimeout(() => {
+    try {
+      frameWindow.focus();
+      frameWindow.print();
+    } catch {
+      cleanup();
+    }
+  }, 200);
+  return true;
 }
 
 function getVietnamRegion(latitude: number): VietnamRegion {
@@ -137,6 +270,20 @@ const uiText = {
     savingRoute: 'Đang lưu lộ trình...',
     routeSaved: 'Đã lưu lộ trình vào hồ sơ lượt tham quan.',
     routeSaveFailed: 'Không thể lưu lộ trình. Vui lòng thử lại.',
+    printRoute: '🖨 In lộ trình',
+    routeResultTitle: 'Lộ trình đã chọn',
+    routeDraftNote: 'Bản nháp — chưa lưu vào lượt tham quan.',
+    editRoute: 'Chỉnh sửa lộ trình',
+    closeDialog: 'Đóng',
+    routeLimitReached: 'Lộ trình tối đa 20 điểm dừng.',
+    totalDistance: 'Tổng quãng đường',
+    fromPrevious: 'Cách điểm trước',
+    startPoint: 'Điểm xuất phát',
+    straightLineNote: 'Khoảng cách tính theo đường chim bay, chỉ mang tính tham khảo.',
+    printUnavailable: 'Không mở được hộp thoại in. Vui lòng kiểm tra trình duyệt.',
+    printDocumentTitle: 'Lộ trình tham quan',
+    printedAt: 'In lúc',
+    stopsUnit: 'điểm dừng',
     visitStarted: 'Lượt tham quan đang hoạt động',
     exploreTitle: 'Khám phá các điểm đến',
     destinationFilter: 'Tìm điểm tham quan trong danh sách...',
@@ -221,6 +368,20 @@ const uiText = {
     savingRoute: 'Saving itinerary...',
     routeSaved: 'Your itinerary has been saved to this visit.',
     routeSaveFailed: 'Could not save the itinerary. Please try again.',
+    printRoute: '🖨 Print itinerary',
+    routeResultTitle: 'Selected itinerary',
+    routeDraftNote: 'Draft — not saved to your visit yet.',
+    editRoute: 'Edit itinerary',
+    closeDialog: 'Close',
+    routeLimitReached: 'An itinerary can have at most 20 stops.',
+    totalDistance: 'Total distance',
+    fromPrevious: 'From previous stop',
+    startPoint: 'Starting point',
+    straightLineNote: 'Distances are straight-line estimates for reference only.',
+    printUnavailable: 'Could not open the print dialog. Please check your browser.',
+    printDocumentTitle: 'Sightseeing itinerary',
+    printedAt: 'Printed',
+    stopsUnit: 'stops',
     visitStarted: 'Your visit is active',
     exploreTitle: 'Explore destinations',
     destinationFilter: 'Search destinations...',
@@ -305,6 +466,20 @@ const uiText = {
     savingRoute: '正在保存行程...',
     routeSaved: '行程已保存至本次参观记录。',
     routeSaveFailed: '无法保存行程，请重试。',
+    printRoute: '🖨 打印行程',
+    routeResultTitle: '已选行程',
+    routeDraftNote: '草稿——尚未保存至本次参观记录。',
+    editRoute: '编辑行程',
+    closeDialog: '关闭',
+    routeLimitReached: '行程最多包含 20 个景点。',
+    totalDistance: '总距离',
+    fromPrevious: '距上一站',
+    startPoint: '起点',
+    straightLineNote: '距离为直线距离，仅供参考。',
+    printUnavailable: '无法打开打印对话框，请检查浏览器。',
+    printDocumentTitle: '游览行程',
+    printedAt: '打印时间',
+    stopsUnit: '个景点',
     visitStarted: '参观记录已开启',
     exploreTitle: '探索景点',
     destinationFilter: '搜索景点...',
@@ -343,6 +518,7 @@ export default function MapScreenWeb() {
   const [isSavingRoute, setIsSavingRoute] = useState(false);
   const [isClearingRoute, setIsClearingRoute] = useState(false);
   const [isDeletingVisit, setIsDeletingVisit] = useState(false);
+  const [isRouteResultOpen, setIsRouteResultOpen] = useState(false);
 
   const visitorParams = typeof window === 'undefined'
     ? null
@@ -351,6 +527,11 @@ export default function MapScreenWeb() {
   const visitorPoiId = visitorParams?.get('poi') ?? null;
   const visitorPoi = pois.find(poi => poi.id === visitorPoiId) ?? null;
   const geofenceArrivalPoi = pois.find((poi) => poi.id === geofenceArrivalPoiId) ?? null;
+  // Chỉ giữ các điểm còn tồn tại trong danh sách POI hiện tại (tránh id cũ làm sai số liệu).
+  const routePois = routePoiIds
+    .map((poiId) => pois.find((poi) => poi.id === poiId))
+    .filter((poi): poi is Poi => Boolean(poi));
+  const routeSummary = buildRouteLegs(routePois);
 
   const t = uiText[currentLang];
 
@@ -585,6 +766,11 @@ export default function MapScreenWeb() {
   };
 
   const toggleRoutePoi = (poiId: string) => {
+    if (!routePoiIds.includes(poiId) && routePoiIds.length >= MAX_ROUTE_STOPS) {
+      setVisitorError(t.routeLimitReached);
+      return;
+    }
+    setVisitorError('');
     setRoutePoiIds((current) =>
       current.includes(poiId)
         ? current.filter((id) => id !== poiId)
@@ -599,18 +785,55 @@ export default function MapScreenWeb() {
       .map((poi) => poi.id);
     if (regionPoiIds.length === 0) return;
 
-    setRoutePoiIds((current) => {
-      const regionIsSelected = regionPoiIds.some((poiId) => current.includes(poiId));
-      return regionIsSelected
-        ? current.filter((poiId) => !regionPoiIds.includes(poiId))
-        : [...current, ...regionPoiIds.filter((poiId) => !current.includes(poiId))];
-    });
+    const regionIsSelected = regionPoiIds.some((poiId) => routePoiIds.includes(poiId));
+    if (regionIsSelected) {
+      setVisitorError('');
+      setRoutePoiIds((current) => current.filter((poiId) => !regionPoiIds.includes(poiId)));
+    } else {
+      const additions = regionPoiIds.filter((poiId) => !routePoiIds.includes(poiId));
+      const room = Math.max(MAX_ROUTE_STOPS - routePoiIds.length, 0);
+      setVisitorError(additions.length > room ? t.routeLimitReached : '');
+      setRoutePoiIds((current) => [...current, ...additions.slice(0, room)]);
+    }
     setRouteSaved(false);
   };
 
   const beginDesktopRouteSelection = () => {
     setVisitorError('');
     setIsRoutePickerOpen(true);
+  };
+
+  const openDesktopRoute = () => {
+    setVisitorError('');
+    if (routeSaved && routePois.length > 0) {
+      setIsRouteResultOpen(true);
+    } else {
+      beginDesktopRouteSelection();
+    }
+  };
+
+  const handlePrintRoute = () => {
+    if (routePois.length === 0) return;
+    setVisitorError('');
+    const html = buildRoutePrintHtml(
+      routeSummary.legs,
+      routeSummary.totalMeters,
+      currentLang,
+      {
+        documentTitle: t.printDocumentTitle,
+        stopsUnit: t.stopsUnit,
+        totalDistance: t.totalDistance,
+        fromPrevious: t.fromPrevious,
+        startPoint: t.startPoint,
+        coordinates: t.coordLabel.replace(/^[^\p{L}\p{N}]+/u, ''),
+        radius: t.radiusLabel.replace(/^[^\p{L}\p{N}]+/u, ''),
+        metersUnit: t.metersUnit,
+        note: t.straightLineNote,
+        printedAt: t.printedAt,
+      },
+      formatVisitTimestamp(new Date().toISOString(), currentLang) ?? '',
+    );
+    if (!printRouteDocument(html)) setVisitorError(t.printUnavailable);
   };
 
   const moveRouteStop = (poiId: string, direction: -1 | 1) => {
@@ -686,6 +909,7 @@ export default function MapScreenWeb() {
       setRoutePoiIds([]);
       setRouteSaved(false);
       setIsRoutePickerOpen(false);
+      setIsRouteResultOpen(false);
     } catch (error) {
       setVisitorError(error instanceof Error ? error.message : t.clearRouteFailed);
     } finally {
@@ -1092,16 +1316,16 @@ export default function MapScreenWeb() {
                     </TouchableOpacity>
                     <TouchableOpacity
                       accessibilityLabel={t.moveUp}
-                      style={styles.moveButton}
-                      disabled={visitorStatus !== 'inside'}
+                      style={[styles.moveButton, (visitorStatus !== 'inside' || index === 0) && styles.routeControlDisabled]}
+                      disabled={visitorStatus !== 'inside' || index === 0}
                       onPress={() => moveRouteStop(poiId, -1)}
                     >
                       <Text style={styles.moveButtonText}>↑</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       accessibilityLabel={t.moveDown}
-                      style={styles.moveButton}
-                      disabled={visitorStatus !== 'inside'}
+                      style={[styles.moveButton, (visitorStatus !== 'inside' || index === routePoiIds.length - 1) && styles.routeControlDisabled]}
+                      disabled={visitorStatus !== 'inside' || index === routePoiIds.length - 1}
                       onPress={() => moveRouteStop(poiId, 1)}
                     >
                       <Text style={styles.moveButtonText}>↓</Text>
@@ -1109,6 +1333,17 @@ export default function MapScreenWeb() {
                   </View>
                 );
               })
+            )}
+            {routePois.length > 0 && (
+              <>
+                <Text style={styles.routeSummaryTotal}>
+                  {t.totalDistance}: {formatDistance(routeSummary.totalMeters)}
+                </Text>
+                <Text style={styles.routeHelp}>{t.straightLineNote}</Text>
+                <TouchableOpacity style={styles.secondaryButton} onPress={handlePrintRoute}>
+                  <Text style={styles.secondaryButtonText}>{t.printRoute}</Text>
+                </TouchableOpacity>
+              </>
             )}
             {isRoutePickerOpen && (
               <TouchableOpacity
@@ -1257,7 +1492,7 @@ export default function MapScreenWeb() {
           <Text style={styles.headerTitle}>{t.locationLabel}</Text>
           <TouchableOpacity
             style={styles.desktopRouteButton}
-            onPress={beginDesktopRouteSelection}
+            onPress={openDesktopRoute}
           >
             <Text style={styles.desktopRouteButtonText}>
               {`${t.routeButton}${routePoiIds.length ? ` · ${routePoiIds.length}` : ''}`}
@@ -1476,32 +1711,114 @@ export default function MapScreenWeb() {
               {visitorError && <Text style={styles.errorMessage}>{visitorError}</Text>}
             </ScrollView>
             <View style={styles.desktopRouteDialogFooter}>
-              {routePoiIds.length > 0 && (
-                <TouchableOpacity
-                  style={styles.clearRouteButton}
+              <View style={styles.routeFooterActions}>
+                {routePoiIds.length > 0 && (
+                  <TouchableOpacity
+                    style={[styles.clearRouteButton, styles.routeFooterButtonReset]}
                     disabled={isClearingRoute || isSavingRoute}
-                  onPress={() => void handleClearRoute()}
-                >
-                  <Text style={styles.clearRouteButtonText}>
-                    {isClearingRoute ? t.clearingRoute : t.clearRoute}
-                  </Text>
-                </TouchableOpacity>
-              )}
+                    onPress={() => void handleClearRoute()}
+                  >
+                    <Text style={styles.clearRouteButtonText}>
+                      {isClearingRoute ? t.clearingRoute : t.clearRoute}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                {routePois.length > 0 && (
+                  <TouchableOpacity
+                    style={[styles.secondaryButton, styles.routeFooterButtonReset]}
+                    onPress={handlePrintRoute}
+                  >
+                    <Text style={styles.secondaryButtonText}>{t.printRoute}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
               <TouchableOpacity
                 style={[
                   styles.primaryButton,
+                  styles.routeFooterButtonReset,
                   (routePoiIds.length === 0 || isSavingRoute) && styles.buttonDisabled,
                 ]}
                 disabled={routePoiIds.length === 0 || isSavingRoute}
                 onPress={() => {
                   void handleSaveRoute().then((saved) => {
-                    if (saved) setIsRoutePickerOpen(false);
+                    if (saved) {
+                      setIsRoutePickerOpen(false);
+                      setIsRouteResultOpen(true);
+                    }
                   });
                 }}
               >
-                <Text style={styles.primaryButtonText}>
+                <Text style={[styles.primaryButtonText, styles.routeFooterPrimaryText]}>
                   {isSavingRoute ? t.savingRoute : t.confirmRoute}
                 </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+      {isRouteResultOpen && (
+        <View style={styles.desktopRouteOverlay}>
+          <View style={styles.desktopRouteDialog}>
+            <View style={styles.desktopRouteDialogHeader}>
+              <View style={styles.routeOptionCopy}>
+                <Text style={styles.routeTitle}>{t.routeResultTitle} · {routePois.length}</Text>
+                <Text style={routeSaved ? styles.successMessage : styles.routeHelp}>
+                  {routeSaved ? t.routeSaved : t.routeDraftNote}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.moveButton}
+                accessibilityLabel={t.closeDialog}
+                onPress={() => setIsRouteResultOpen(false)}
+              >
+                <Text style={styles.moveButtonText}>×</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.desktopRouteDialogScroll}>
+              {routeSummary.legs.map(({ poi, distanceFromPreviousMeters }, index) => (
+                <View key={poi.id} style={styles.routeResultStop}>
+                  <Text style={styles.routeResultNumber}>{index + 1}</Text>
+                  <View style={styles.routeOptionCopy}>
+                    <Text style={styles.routeOptionName}>{poi.name?.[currentLang] || poi.name?.vi}</Text>
+                    <Text style={styles.routeOptionDescription} numberOfLines={3}>
+                      {poi.description?.[currentLang] || poi.description?.vi}
+                    </Text>
+                    <Text style={styles.routeStopMeta}>
+                      {distanceFromPreviousMeters === null
+                        ? t.startPoint
+                        : `${t.fromPrevious}: ${formatDistance(distanceFromPreviousMeters)}`}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    accessibilityLabel={t.directions}
+                    style={styles.moveButton}
+                    onPress={() => openGoogleMaps(poi)}
+                  >
+                    <Text style={styles.moveButtonText}>↗</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+              <Text style={styles.routeSummaryTotal}>
+                {t.totalDistance}: {formatDistance(routeSummary.totalMeters)}
+              </Text>
+              <Text style={styles.routeHelp}>{t.straightLineNote}</Text>
+              {visitorError ? <Text style={styles.errorMessage}>{visitorError}</Text> : null}
+            </ScrollView>
+            <View style={styles.desktopRouteDialogFooter}>
+              <TouchableOpacity
+                style={[styles.secondaryButton, styles.routeFooterButtonReset]}
+                onPress={() => {
+                  setIsRouteResultOpen(false);
+                  beginDesktopRouteSelection();
+                }}
+              >
+                <Text style={styles.secondaryButtonText}>{t.editRoute}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.primaryButton, styles.routeFooterButtonReset]}
+                onPress={handlePrintRoute}
+              >
+                <Text style={[styles.primaryButtonText, styles.routeFooterPrimaryText]}>{t.printRoute}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2322,6 +2639,66 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.5,
+  },
+  secondaryButton: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#b8d7c4',
+    backgroundColor: '#eef7f1',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    marginTop: 12,
+  },
+  secondaryButtonText: {
+    color: '#286847',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  routeFooterActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    flexShrink: 1,
+  },
+  routeFooterButtonReset: {
+    marginTop: 0,
+    marginBottom: 0,
+  },
+  routeFooterPrimaryText: {
+    paddingHorizontal: 18,
+  },
+  routeResultStop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#efeee8',
+  },
+  routeResultNumber: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#3d9b62',
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'center',
+    lineHeight: 30,
+  },
+  routeStopMeta: {
+    color: '#6d7f8b',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  routeSummaryTotal: {
+    color: '#203548',
+    fontSize: 14,
+    fontWeight: '800',
+    marginTop: 14,
   },
   successMessage: {
     color: '#287548',
