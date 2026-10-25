@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import Settings
 from app.core.security_guard import validate_security_config
 from app.db.mongo import check_transaction_support, connect_mongo
-from backend.app.db.redis import connect_redis
+from app.db.redis import connect_redis
 from app.routers import ROUTERS
 from app.routers import health as health_router
 from app.services.audio_recovery import recover_audio_tasks
