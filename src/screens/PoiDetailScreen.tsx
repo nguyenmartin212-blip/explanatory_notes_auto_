@@ -1,9 +1,19 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Screen } from '@/components';
 import { NarrationPlayer } from '@/features/narration/components/NarrationPlayer';
 import { useOfflinePoi } from '@/features/content';
+import {
+  addPoiToItinerary,
+  getAppPreferences,
+  getItineraryPois,
+  isPoiSaved,
+  removePoiFromItinerary,
+  toggleSavedPoi,
+  updateAppPreferences,
+  type AppPreferences,
+} from '@/features/content/database';
 import type { RootStackParamList } from '@/navigation';
 import type { SupportedLanguage } from '@/types';
 import { colors, radius, spacing } from '@/theme';
@@ -13,11 +23,39 @@ const LANGUAGES: { key: SupportedLanguage; label: string }[] = [
   { key: 'vi', label: '🇻🇳 Tiếng Việt' },
   { key: 'en', label: '🇬🇧 English' },
   { key: 'zh', label: '🇨🇳 中文' },
+  { key: 'ko', label: '🇰🇷 한국어' },
 ];
 
 export function PoiDetailScreen({ route }: Props) {
   const { poi, isLoading, error } = useOfflinePoi(route.params.poiId);
   const [language, setLanguage] = useState<SupportedLanguage>('vi');
+  const [preferences, setPreferences] = useState<AppPreferences>({
+    language: 'vi',
+    autoPlayNarration: false,
+  });
+  const [isSaved, setIsSaved] = useState(false);
+  const [isInItinerary, setIsInItinerary] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isCurrent = true;
+    void Promise.all([
+      getAppPreferences(),
+      isPoiSaved(route.params.poiId),
+      getItineraryPois(),
+    ]).then(([savedPreferences, saved, itinerary]) => {
+      if (!isCurrent) return;
+      setPreferences(savedPreferences);
+      setLanguage(savedPreferences.language);
+      setIsSaved(saved);
+      setIsInItinerary(itinerary.some((item) => item.id === route.params.poiId));
+    }).catch((cause: unknown) => {
+      if (isCurrent) {
+        setActionError(cause instanceof Error ? cause.message : 'Không thể tải cài đặt điểm đến.');
+      }
+    });
+    return () => { isCurrent = false; };
+  }, [route.params.poiId]);
 
   if (isLoading) {
     return (
@@ -39,6 +77,41 @@ export function PoiDetailScreen({ route }: Props) {
   const description = poi.description[language] ?? poi.description.vi;
   const script = poi.ttsScript?.[language] ?? poi.ttsScript?.vi;
 
+  const toggleSaved = async () => {
+    try {
+      setIsSaved(await toggleSavedPoi(poi.id));
+      setActionError(null);
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : 'Không thể cập nhật điểm đã lưu.');
+    }
+  };
+
+  const toggleItinerary = async () => {
+    try {
+      if (isInItinerary) {
+        await removePoiFromItinerary(poi.id);
+        setIsInItinerary(false);
+      } else {
+        await addPoiToItinerary(poi.id);
+        setIsInItinerary(true);
+      }
+      setActionError(null);
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : 'Không thể cập nhật lộ trình.');
+    }
+  };
+
+  const changeLanguage = async (nextLanguage: SupportedLanguage) => {
+    setLanguage(nextLanguage);
+    try {
+      const updated = await updateAppPreferences({ language: nextLanguage });
+      setPreferences(updated);
+      setActionError(null);
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : 'Không thể lưu ngôn ngữ.');
+    }
+  };
+
   return (
     <Screen>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
@@ -59,12 +132,36 @@ export function PoiDetailScreen({ route }: Props) {
         <Text style={styles.sectionTitle}>Về địa điểm</Text>
         <Text style={styles.description}>{description}</Text>
 
+        <View style={styles.actions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: isSaved }}
+            onPress={() => void toggleSaved()}
+            style={[styles.actionButton, isSaved && styles.actionActive]}
+          >
+            <Text style={[styles.actionText, isSaved && styles.actionActiveText]}>
+              {isSaved ? '♥ Đã lưu' : '♡ Lưu điểm'}
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: isInItinerary }}
+            onPress={() => void toggleItinerary()}
+            style={[styles.actionButton, isInItinerary && styles.actionActive]}
+          >
+            <Text style={[styles.actionText, isInItinerary && styles.actionActiveText]}>
+              {isInItinerary ? '✓ Trong lộ trình · Gỡ' : '＋ Thêm vào lộ trình'}
+            </Text>
+          </Pressable>
+        </View>
+        {actionError && <Text accessibilityRole="alert" style={styles.actionError}>{actionError}</Text>}
+
         <Text style={styles.sectionTitle}>Ngôn ngữ thuyết minh</Text>
         <View style={styles.languages}>
           {LANGUAGES.map((item) => (
             <Pressable
               key={item.key}
-              onPress={() => setLanguage(item.key)}
+              onPress={() => void changeLanguage(item.key)}
               accessibilityRole="button"
               accessibilityState={{ selected: language === item.key }}
               style={[styles.language, language === item.key && styles.languageActive]}
@@ -92,7 +189,10 @@ Nội dung demo được đọc bằng giọng TTS trên thiết bị. Bản thu
         <NarrationPlayer
           poi={poi}
           language={language}
-          autoStart={route.params.autoplay === true}
+          autoStart={
+            route.params.autoplay === true ||
+            (route.params.origin !== 'qr' && preferences.autoPlayNarration)
+          }
           origin={route.params.origin ?? 'manual'}
         />
         <Text style={styles.disclaimer}>Vị trí và nội dung trong bản demo chỉ mang tính giới thiệu.</Text>
@@ -121,6 +221,12 @@ const styles = StyleSheet.create({
   languageActive: { backgroundColor: colors.teal, borderColor: colors.teal },
   languageText: { color: colors.text, fontSize: 12, fontWeight: '700' },
   languageTextActive: { color: '#fff' },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 16 },
+  actionButton: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 12, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10 },
+  actionActive: { backgroundColor: colors.teal, borderColor: colors.teal },
+  actionText: { color: colors.teal, fontSize: 12, fontWeight: '800' },
+  actionActiveText: { color: '#fff' },
+  actionError: { color: colors.error, fontSize: 12, marginTop: 8 },
   storyCard: { marginTop: 20, borderRadius: radius.lg, padding: spacing.md, backgroundColor: '#FFFDF8', borderWidth: 1, borderColor: colors.border },
   storyEyebrow: { color: colors.primary, fontSize: 10, fontWeight: '800', letterSpacing: 1.1 },
   storyText: { color: colors.text, fontSize: 14, lineHeight: 23, marginTop: 10 },
