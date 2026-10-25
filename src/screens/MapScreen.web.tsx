@@ -1196,6 +1196,13 @@ export default function MapScreenWeb() {
         </View>
         <View style={styles.topbarActions}>
           <TouchableOpacity
+            accessibilityRole="button"
+            style={styles.adminEntryButton}
+            onPress={() => window.location.assign('/admin')}
+          >
+            <Text style={styles.adminEntryButtonText}>Quản trị Admin</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
             style={[styles.locationButton, isLocationTracking && styles.locationButtonActive]}
             onPress={toggleLocationTracking}
           >
@@ -1524,7 +1531,22 @@ const styles = StyleSheet.create({
   topbarActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
     gap: 8,
+  },
+  adminEntryButton: {
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#b8d7c4',
+    backgroundColor: '#eef7f1',
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+  },
+  adminEntryButtonText: {
+    color: '#286847',
+    fontSize: 12,
+    fontWeight: '800',
   },
   brand: {
     color: '#388557',
