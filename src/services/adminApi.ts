@@ -1,4 +1,30 @@
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
+const CONFIGURED_API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
+const LOCAL_HOST =
+  /^(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$/;
+
+/**
+ * Đăng nhập admin dùng cookie httpOnly, và cookie chỉ được gửi lại khi trang web và API cùng "site".
+ * `npm run web` đặt API = IP LAN nhưng Expo thường mở trình duyệt ở http://localhost:8081, nên
+ * đăng nhập báo thành công rồi mọi request sau đều 401. Khi cả trang lẫn API đều là địa chỉ nội bộ,
+ * gọi API bằng đúng hostname mà trang đang dùng.
+ */
+function resolveApiUrl() {
+  if (typeof window === 'undefined') return CONFIGURED_API_URL;
+  try {
+    const url = new URL(CONFIGURED_API_URL);
+    const pageHost = window.location.hostname;
+    if (url.hostname !== pageHost && LOCAL_HOST.test(url.hostname) && LOCAL_HOST.test(pageHost)) {
+      url.hostname = pageHost;
+      return url.toString().replace(/\/$/, '');
+    }
+  } catch {
+    // Giữ nguyên địa chỉ đã cấu hình nếu không phân tích được.
+  }
+  return CONFIGURED_API_URL;
+}
+
+const API_URL = resolveApiUrl();
+export const ADMIN_API_URL = API_URL;
 
 export type AdminUser = {
   user_id: string;
