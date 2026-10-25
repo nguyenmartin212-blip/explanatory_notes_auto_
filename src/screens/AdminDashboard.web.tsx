@@ -12,6 +12,7 @@ import { useBrowserPois } from '@/features/content/web-hooks';
 import { ADMIN_PERMISSION_GROUPS, hasAdminPermission } from '@/features/admin/permissions';
 import type { Poi } from '@/features/poi';
 import {
+  ADMIN_API_URL,
   AdminApiError,
   adminLogin,
   adminLogout,
@@ -47,6 +48,25 @@ function responseMessage(error: unknown) {
     if (error.status === 403) return 'Tài khoản hiện tại không có quyền thực hiện thao tác này.';
   }
   return error instanceof Error ? error.message : 'Đã xảy ra lỗi. Vui lòng thử lại.';
+}
+
+// Lỗi riêng cho màn đăng nhập: 401 ở đây là sai thông tin, không phải "phiên hết hạn".
+function loginErrorMessage(error: unknown) {
+  if (error instanceof AdminApiError) {
+    if (error.status === 401) {
+      return /disabled/i.test(error.message)
+        ? 'Tài khoản này đã bị vô hiệu hóa.'
+        : 'Sai tên đăng nhập hoặc mật khẩu.';
+    }
+    if (error.status === 403) return 'Tài khoản không có quyền truy cập khu vực quản trị.';
+    if (error.status === 422) return 'Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu.';
+    if (error.status === 503) return 'Dịch vụ xác thực tạm thời không khả dụng. Vui lòng thử lại sau.';
+    return error.message;
+  }
+  if (error instanceof TypeError) {
+    return `Không kết nối được máy chủ API (${ADMIN_API_URL}). Hãy kiểm tra backend đang chạy và cấu hình CORS.`;
+  }
+  return error instanceof Error ? error.message : 'Không thể đăng nhập. Vui lòng thử lại.';
 }
 
 export default function AdminDashboardWeb() {
@@ -183,11 +203,21 @@ export default function AdminDashboardWeb() {
     setLoginError('');
     try {
       const result = await adminLogin(username.trim(), password);
-      setUser(result.user);
+      let currentUser = result.user;
+      try {
+        // Xác nhận trình duyệt thật sự giữ được cookie phiên trước khi vào dashboard.
+        currentUser = await getAdminMe();
+      } catch {
+        throw new Error(
+          `Đăng nhập thành công nhưng trình duyệt không giữ được phiên (cookie bị chặn). ` +
+            `Hãy mở trang bằng cùng địa chỉ với máy chủ API (${ADMIN_API_URL}).`,
+        );
+      }
+      setUser(currentUser);
       setPassword('');
       setNotice('Đăng nhập thành công.');
     } catch (error) {
-      setLoginError(responseMessage(error));
+      setLoginError(loginErrorMessage(error));
     } finally {
       setIsLoggingIn(false);
     }
@@ -525,7 +555,6 @@ export default function AdminDashboardWeb() {
                   }}
                 />
               ) : null}
-              <Text style={styles.footnote}>API hiện có hỗ trợ xem tài khoản và gán vai trò; không hỗ trợ tạo hoặc xóa tài khoản.</Text>
             </View>
           ) : null}
 
@@ -718,7 +747,6 @@ export default function AdminDashboardWeb() {
                   setVisitsPage(page);
                 }}
               />
-              <Text style={styles.footnote}>Lượt khách được lưu ẩn danh; dữ liệu backend tự hết hạn sau 90 ngày.</Text>
             </View>
           ) : null}
 
