@@ -4,11 +4,12 @@ import { ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME } from '../auth/constants.js';
 import { buildContext, extractToken } from '../auth/context.js';
 import { clearAuthCookies, parseCookies, setAuthCookies } from '../auth/cookies.js';
 import { requireAuth, requirePermission } from '../auth/dependencies.js';
-import { settingsOf, stateOf, wrap } from '../core/http.js';
+import { queryNumber, settingsOf, stateOf, wrap } from '../core/http.js';
+import { ValidationError } from '../core/errors.js';
 import { parseLoginRequest, parseRefreshRequest } from '../schemas/auth.js';
 import * as audioSse from '../services/audioSse.js';
 import * as authService from '../services/authService.js';
-import { roleStore } from '../stores/index.js';
+import { roleStore, visitorVisitStore } from '../stores/index.js';
 
 export const router = Router();
 
@@ -49,6 +50,32 @@ router.post('/auth/logout', wrap(async (req, res) => {
 router.get('/auth/me', requireAuth, (req, res) => {
   res.json(authService.userView(req.auth));
 });
+
+// ---- Anonymous visitor records ------------------------------------------------------------------
+router.get('/visitor-visits', requirePermission('visitor:read'), wrap(async (req, res) => {
+  const limit = queryNumber(req, 'limit', { def: 50, min: 1, max: 200, integer: true });
+  const offset = queryNumber(req, 'offset', { def: 0, min: 0, integer: true });
+  let poiId = null;
+
+  if (req.query.poi_id !== undefined && req.query.poi_id !== '') {
+    poiId = req.query.poi_id;
+    if (typeof poiId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9-]{1,80}$/.test(poiId)) {
+      throw new ValidationError([{
+        loc: ['query', 'poi_id'],
+        msg: "String should match pattern '^[A-Za-z0-9][A-Za-z0-9-]{1,80}$'",
+      }]);
+    }
+  }
+
+  const { db } = stateOf(req);
+  const { items, total } = await visitorVisitStore.listVisits(db, {
+    limit,
+    offset,
+    poiId,
+  });
+
+  res.json({ items, total, limit, offset });
+}));
 
 // ---- Audio task progress (SSE) -------------------------------------------------------------------
 /** Server-Sent Events: audio task progress (snapshot, then every change). */

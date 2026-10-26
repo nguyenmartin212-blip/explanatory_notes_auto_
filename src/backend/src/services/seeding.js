@@ -5,7 +5,7 @@ import { DEFAULT_ROLES, SUPER_ADMIN_ROLE } from '../auth/permissions.js';
 import { StartupError } from '../core/errors.js';
 import { logger } from '../core/logger.js';
 import {
-  adminUserStore, audioTaskStore, auditLogStore, poiDatasetStore, poiLocalizationStore, poiStore, roleStore, uiBundleStore,
+  adminUserStore, analyticsStore, audioTaskStore, auditLogStore, poiDatasetStore, poiLocalizationStore, poiStore, roleStore, uiBundleStore, visitorVisitStore,
 } from '../stores/index.js';
 
 export async function seedRoles(db) {
@@ -16,7 +16,9 @@ export async function seedRoles(db) {
   await poiLocalizationStore.ensureIndexes(db);
   await poiDatasetStore.ensureIndexes(db);
   await auditLogStore.ensureIndexes(db);
+  await analyticsStore.ensureIndexes(db);
   await uiBundleStore.ensureIndexes(db);
+  await visitorVisitStore.ensureIndexes(db);
   await adminUserStore.backfillUserIds(db);
   // Roles live in MongoDB and are edited at runtime: only missing defaults are inserted, existing roles are
   // never overwritten.

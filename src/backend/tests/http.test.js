@@ -73,6 +73,25 @@ describe('http', { skip }, () => {
     assert.equal((await down.json()).checks.redis, false);
   });
 
+  it('device analytics heartbeat and protected usage summary', async () => {
+    const heartbeat = await post('/api/analytics/devices/heartbeat', {
+      device_id: 'http-test-device', device_name: 'Test Android',
+    }, bearer(adminToken));
+    assert.equal(heartbeat.status, 200);
+    const heartbeatBody = await heartbeat.json();
+    assert.equal(heartbeatBody.device_id, 'http-test-device');
+    assert.equal(heartbeatBody.device_name, 'Test Android');
+
+    const unauthorized = await get('/api/analytics/usage?period=day');
+    assert.equal(unauthorized.status, 401);
+    const summary = await get('/api/analytics/usage?period=day', { headers: bearer(adminToken) });
+    assert.equal(summary.status, 200);
+    const body = await summary.json();
+    assert.ok(body.active_device_count >= 1);
+    assert.ok(body.active_devices.some((device) => device.device_id === 'http-test-device'));
+    assert.ok(Array.isArray(body.usage));
+  });
+
   it('GET /pois returns the FE shape with an ETag and answers 304', async () => {
     const res = await get('/pois');
     assert.equal(res.status, 200);

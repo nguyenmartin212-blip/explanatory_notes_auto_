@@ -1,4 +1,4 @@
-// RBAC catalog: 28 permissions in 8 domains, and the 2 default roles (only admin accounts exist).
+// RBAC catalog: permissions grouped by domain, and the 2 default roles (only admin accounts exist).
 // Permission names are `<domain>:<action>`. Roles are stored in MongoDB (`roles`) and can be edited
 // at runtime; this module only defines what exists and what the default roles start with.
 // The only wildcard is "*", reserved for `super_admin`.
@@ -42,6 +42,9 @@ export const PERMISSION_CATALOG = {
     'role:create': 'Create roles',
     'role:update': 'Change role permissions',
     'role:delete': 'Delete roles',
+  },
+  visitor: {
+    'visitor:read': 'View anonymous visitor records',
   },
   analytics: {
     'analytics:read': 'View analytics',

@@ -64,9 +64,9 @@ async function setup() {
 }
 
 describe('catalog and tokens', () => {
-  test('28 permissions in 8 domains', () => {
-    assert.equal(perms.ALL_PERMISSIONS.size, 28);
-    assert.equal(perms.DOMAINS.length, 8);
+  test('29 permissions in 9 domains', () => {
+    assert.equal(perms.ALL_PERMISSIONS.size, 29);
+    assert.equal(perms.DOMAINS.length, 9);
   });
 
   test('default roles: only super_admin and admin', () => {

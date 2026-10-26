@@ -3,7 +3,7 @@
 //   2. Database / Cache / Media
 //   3. Seeding & Runtime
 //   4. Recovery & Background Workers
-//   5. Mount API (10 routers, /health, /health/ready, /static)
+//   5. Mount API (11 routers, /health, /health/ready, /static)
 // The app only becomes ready (app.locals.state.ready = true) after step 5.
 import express from 'express';
 import { errorMiddleware, notFoundMiddleware } from './core/errorHandlers.js';
