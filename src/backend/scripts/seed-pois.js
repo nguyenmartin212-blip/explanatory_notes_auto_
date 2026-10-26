@@ -106,7 +106,9 @@ export async function seed(db, settings, { activate = true } = {}) {
   for (const data of DEMO_POIS) {
     const poiId = data.poi_id;
     try {
-      const { poi_id: _ignored, ...rest } = data;
+      // const { poi_id: _ignored, ...rest } = data;
+      const rest = { ...data };
+      delete rest.poi_id;
       await contentService.updatePoi(db, settings, poiId, parsePoiUpdate(rest));
       result[poiId] = 'updated';
     } catch (err) {

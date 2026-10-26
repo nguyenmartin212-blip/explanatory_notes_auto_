@@ -39,7 +39,7 @@ export function describeError(err) {
   return null;
 }
 
-export function errorMiddleware(err, req, res, next) { // eslint-disable-line no-unused-vars
+export function errorMiddleware(err, req, res, next) { 
   const described = describeError(err);
   if (!described) {
     logger.exception(`Unhandled error on ${req.method} ${req.originalUrl}`, err);
