@@ -1,0 +1,11 @@
+// Barrel for the store layer.
+export * as adminUserStore from './adminUserStore.js';
+export * as analyticsStore from './analyticsStore.js';
+export * as audioTaskStore from './audioTaskStore.js';
+export * as auditLogStore from './auditLogStore.js';
+export * as poiDatasetStore from './poiDatasetStore.js';
+export * as poiLocalizationStore from './poiLocalizationStore.js';
+export * as poiStore from './poiStore.js';
+export * as roleStore from './roleStore.js';
+export * as uiBundleStore from './uiBundleStore.js';
+export * as visitorVisitStore from './visitorVisitStore.js';
