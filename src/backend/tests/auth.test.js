@@ -64,13 +64,13 @@ async function setup() {
 }
 
 describe('catalog and tokens', () => {
-  test('29 permissions in 9 domains', () => {
-    assert.equal(perms.ALL_PERMISSIONS.size, 29);
-    assert.equal(perms.DOMAINS.length, 9);
+  test('32 permissions in 10 domains', () => {
+    assert.equal(perms.ALL_PERMISSIONS.size, 32);
+    assert.equal(perms.DOMAINS.length, 10);
   });
 
-  test('default roles: only super_admin and admin', () => {
-    assert.deepEqual(new Set(perms.DEFAULT_ROLES.map((r) => r.name)), new Set(['super_admin', 'admin']));
+  test('default roles include all four account types', () => {
+    assert.deepEqual(new Set(perms.DEFAULT_ROLES.map((r) => r.name)), new Set(['super_admin', 'admin', 'user', 'poi_owner']));
   });
 
   test('token lifetimes: access 30 min, refresh 7 days', () => {

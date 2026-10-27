@@ -1,7 +1,7 @@
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
 type ApiRequestOptions = {
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST'| 'PUT';
   accessToken?: string;
   body?: unknown;
 };
@@ -29,4 +29,12 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
 
 export function apiGet<T>(path: string, accessToken?: string): Promise<T> {
   return apiRequest<T>(path, { accessToken });
+}
+
+export function apiPost<T>(path: string, body: unknown, accessToken?: string,): Promise<T> {
+  return apiRequest<T>(path, { method: 'POST', body, accessToken });
+}
+
+export function apiPut<T>(path: string, body: unknown, accessToken?: string,): Promise<T> {
+  return apiRequest<T>(path, { method: 'PUT', body, accessToken,});
 }

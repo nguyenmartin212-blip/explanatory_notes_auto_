@@ -4,12 +4,14 @@ import { ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME } from '../auth/constants.js';
 import { buildContext, extractToken } from '../auth/context.js';
 import { clearAuthCookies, parseCookies, setAuthCookies } from '../auth/cookies.js';
 import { requireAuth, requirePermission } from '../auth/dependencies.js';
+import { defaultHasher } from '../auth/passwords.js';
 import { queryNumber, settingsOf, stateOf, wrap } from '../core/http.js';
-import { ValidationError } from '../core/errors.js';
+import { PermissionDenied, ValidationError } from '../core/errors.js';
 import { parseLoginRequest, parseRefreshRequest } from '../schemas/auth.js';
 import * as audioSse from '../services/audioSse.js';
 import * as authService from '../services/authService.js';
-import { roleStore, visitorVisitStore } from '../stores/index.js';
+import { adminUserStore, roleStore, visitorVisitStore } from '../stores/index.js';
+import * as roleService from '../services/roleService.js';
 
 export const router = Router();
 
@@ -50,6 +52,178 @@ router.post('/auth/logout', wrap(async (req, res) => {
 router.get('/auth/me', requireAuth, (req, res) => {
   res.json(authService.userView(req.auth));
 });
+
+// ---- Account management -------------------------------------------------------------------------
+
+function accountView(user) {
+  return {
+    user_id: user.user_id,
+    username: user.username,
+    email: user.email ?? null,
+    role: user.role,
+    is_active: Boolean(user.is_active),
+    created_at: user.created_at ?? null,
+    updated_at: user.updated_at ?? null,
+    last_login_at: user.last_login_at ?? null,
+  };
+}
+
+function requireObjectBody(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new ValidationError([
+      { loc: ['body'], msg: 'Input should be a valid object' },
+    ]);
+  }
+}
+
+// GET /admin/users?limit=50&offset=0
+router.get('/users', requirePermission('user:read'), wrap(async (req, res) => {
+  const limit = queryNumber(req, 'limit', {
+    def: 50, min: 1, max: 200, integer: true,
+  });
+  const offset = queryNumber(req, 'offset', {
+    def: 0, min: 0, integer: true,
+  });
+
+  const { db } = stateOf(req);
+  const { items, total } = await adminUserStore.listUsers(db, {
+    limit,
+    offset,
+  });
+
+  res.json({ items, total, limit, offset });
+}));
+
+// POST /admin/users
+// Only a super admin may create accounts through this endpoint.
+router.post('/users', requirePermission('user:create'), wrap(async (req, res) => {
+  if (!req.auth.permissions.has('*')) {
+    throw new PermissionDenied(
+      'forbidden',
+      'Only a super admin can create accounts',
+    );
+  }
+
+  requireObjectBody(req.body);
+
+  const { username, password, email = null, role } = req.body;
+
+  if (
+    typeof username !== 'string'
+    || username.trim().length < 3
+    || username.trim().length > 100
+  ) {
+    throw new ValidationError([
+      { loc: ['body', 'username'], msg: 'Username must contain 3-100 characters' },
+    ]);
+  }
+
+  if (typeof password !== 'string') {
+    throw new ValidationError([
+      { loc: ['body', 'password'], msg: 'Password is required' },
+    ]);
+  }
+
+  if (typeof role !== 'string' || !role.trim()) {
+    throw new ValidationError([
+      { loc: ['body', 'role'], msg: 'A valid role is required' },
+    ]);
+  }
+
+  if (
+    email !== null
+    && (typeof email !== 'string' || email.length > 254)
+  ) {
+    throw new ValidationError([
+      { loc: ['body', 'email'], msg: 'Email must be a string of at most 254 characters or null' },
+    ]);
+  }
+
+  const { db } = stateOf(req);
+  const roleDoc = await roleStore.get(db, role.trim());
+
+  if (!roleDoc) {
+    throw new ValidationError([
+      { loc: ['body', 'role'], msg: 'Role does not exist' },
+    ]);
+  }
+
+  const passwordHash = await defaultHasher.hash(password);
+
+  const user = await adminUserStore.createUser(db, {
+    username: username.trim(),
+    passwordHash,
+    email: email?.trim() || null,
+    role: roleDoc.name,
+  });
+
+  res.status(201).json({ user: accountView(user) });
+}));
+
+// PUT /admin/users/:user_id/role
+router.put('/users/:user_id/role', requirePermission('user:update'), wrap(async (req, res) => {
+  requireObjectBody(req.body);
+
+  const role = req.body.role;
+  if (typeof role !== 'string' || !role.trim()) {
+    throw new ValidationError([
+      { loc: ['body', 'role'], msg: 'Role is required' },
+    ]);
+  }
+
+  const { db } = stateOf(req);
+  const user = await roleService.assignRole(
+    db,
+    req.auth,
+    req.params.user_id,
+    role.trim(),
+  );
+
+  res.json({ user: accountView(user) });
+}));
+
+// GET /admin/roles
+router.get('/roles', requirePermission('role:read'), wrap(async (req, res) => {
+  const { db } = stateOf(req);
+  const roles = await roleService.listRoles(db, req.auth);
+  res.json({ items: roles });
+}));
+
+// PUT /admin/roles/:name
+router.put('/roles/:name', requirePermission('role:update'), wrap(async (req, res) => {
+  requireObjectBody(req.body);
+
+  const { permissions, description } = req.body;
+
+  if (
+    permissions !== undefined
+    && (!Array.isArray(permissions)
+      || !permissions.every((permission) => typeof permission === 'string'))
+  ) {
+    throw new ValidationError([
+      { loc: ['body', 'permissions'], msg: 'Permissions must be an array of strings' },
+    ]);
+  }
+
+  if (description !== undefined && typeof description !== 'string') {
+    throw new ValidationError([
+      { loc: ['body', 'description'], msg: 'Description must be a string' },
+    ]);
+  }
+
+  const { db } = stateOf(req);
+  const role = await roleService.updateRole(
+    db,
+    req.auth,
+    req.params.name,
+    {
+      permissions: permissions ?? null,
+      description: description ?? null,
+    },
+  );
+
+  res.json({ role });
+}));
 
 // ---- Anonymous visitor records ------------------------------------------------------------------
 router.get('/visitor-visits', requirePermission('visitor:read'), wrap(async (req, res) => {

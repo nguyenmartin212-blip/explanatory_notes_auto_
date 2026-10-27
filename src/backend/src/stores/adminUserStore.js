@@ -95,3 +95,37 @@ export async function setRole(db, userId, role) {
   return updateFields(db, userId, { role });
 }
 
+/**
+ * List accounts for the admin dashboard.
+ * Never return password_hash or token_version.
+ */
+export async function listUsers(db, { limit = 50, offset = 0 } = {}) {
+  const coll = db.collection(ADMIN_USERS);
+
+  const [items, total] = await Promise.all([
+    coll.find(
+      {},
+      {
+        projection: {
+          _id: 0,
+          user_id: 1,
+          username: 1,
+          email: 1,
+          role: 1,
+          is_active: 1,
+          created_at: 1,
+          updated_at: 1,
+          last_login_at: 1,
+        },
+      },
+    )
+      .sort({ created_at: -1 })
+      .skip(offset)
+      .limit(limit)
+      .toArray(),
+
+    coll.countDocuments({}),
+  ]);
+
+  return { items, total };
+}

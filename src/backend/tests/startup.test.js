@@ -109,7 +109,7 @@ describe('step 3: seeding', () => {
     assert.deepEqual(roles.map((r) => r.name).sort(), DEFAULT_ROLES.map((r) => r.name).sort());
     w.db.collection('roles').docs.find((r) => r.name === 'admin').permissions = ['poi:read'];
     await runSeeding(w.db, settings, { hasher });
-    assert.equal(w.db.collection('roles').docs.length, 2);
+    assert.equal(w.db.collection('roles').docs.length, 4);
     assert.deepEqual(w.db.collection('roles').docs.find((r) => r.name === 'admin').permissions, ['poi:read']);
     w.cleanup();
   });

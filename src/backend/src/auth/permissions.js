@@ -9,6 +9,8 @@ export const WILDCARD = '*';
 
 export const SUPER_ADMIN_ROLE = 'super_admin';
 export const ADMIN_ROLE = 'admin';
+export const USER_ROLE = 'user';
+export const POI_OWNER_ROLE = 'poi_owner';
 
 // domain -> { permission: description }
 export const PERMISSION_CATALOG = {
@@ -46,6 +48,11 @@ export const PERMISSION_CATALOG = {
   visitor: {
     'visitor:read': 'View anonymous visitor records',
   },
+  owner: {
+    'owner:read': 'View assigned POI owner information',
+    'owner:profile': 'Manage own POI owner profile',
+    'owner:verify': 'Verify POI owner accounts',
+  },
   analytics: {
     'analytics:read': 'View analytics',
     'analytics:export': 'Export analytics',
@@ -65,7 +72,7 @@ export const PERMISSIONS = Object.fromEntries(Object.values(PERMISSION_CATALOG).
 export const ALL_PERMISSIONS = new Set(Object.keys(PERMISSIONS));
 export const DOMAINS = Object.keys(PERMISSION_CATALOG);
 
-const ADMIN_EXCLUDED = new Set(['role:create', 'role:update', 'role:delete', 'user:delete']);
+const ADMIN_EXCLUDED = new Set(['role:create', 'role:update', 'role:delete', 'user:delete', 'owner:verify',]);
 
 export const DEFAULT_ROLES = [
   {
@@ -78,6 +85,18 @@ export const DEFAULT_ROLES = [
     name: ADMIN_ROLE,
     description: 'Operates the system; cannot manage roles or delete users',
     permissions: [...ALL_PERMISSIONS].filter((p) => !ADMIN_EXCLUDED.has(p)).sort(),
+    is_default: true,
+  },
+  {
+    name: USER_ROLE,
+    description: 'Standard account with limited access',
+    permissions: ['poi:read'],
+    is_default: true,
+  },
+  {
+    name: POI_OWNER_ROLE,
+    description: 'POI owner with access to own profile',
+    permissions: ['poi:read', 'owner:read', 'owner:profile'],
     is_default: true,
   },
 ];
