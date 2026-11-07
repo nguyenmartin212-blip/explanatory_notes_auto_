@@ -4,7 +4,7 @@ FastAPI + MySQL + SQLAlchemy. Sinh giọng đọc bằng edge-tts, dịch bằng
 
 ## 1. Cài đặt (làm 1 lần)
 
-Yêu cầu: Python 3.10+ và MySQL 8 đã chạy, đã chạy file `database/schema.sql` (tạo database `audio_guide`).
+Yêu cầu: Python 3.10+ và MySQL 8 đã chạy
 
 ```bash
 cd backend
@@ -74,47 +74,47 @@ scripts/             init_admin, generate_all_audio
 tests/               pytest
 ```
 
-Luồng một request:  `router → service → store → MySQL`
+Luồng một request: `router → service → store → MySQL`
 
-| Lớp | Làm gì | Không làm gì |
-|---|---|---|
-| router | Nhận request, gọi service, trả kết quả | Không viết truy vấn, không viết nghiệp vụ |
-| schema | Mô tả và kiểm tra dữ liệu | Không có logic |
-| service | Nghiệp vụ (quy tắc của hệ thống) | Không biết về HTTP |
-| store | Truy vấn database | Không có nghiệp vụ |
-| model | Mô tả bảng | Không có logic |
+| Lớp     | Làm gì                                 | Không làm gì                              |
+| ------- | -------------------------------------- | ----------------------------------------- |
+| router  | Nhận request, gọi service, trả kết quả | Không viết truy vấn, không viết nghiệp vụ |
+| schema  | Mô tả và kiểm tra dữ liệu              | Không có logic                            |
+| service | Nghiệp vụ (quy tắc của hệ thống)       | Không biết về HTTP                        |
+| store   | Truy vấn database                      | Không có nghiệp vụ                        |
+| model   | Mô tả bảng                             | Không có logic                            |
 
 ## 7. Danh sách API (đối chiếu với sơ đồ Use Case)
 
 **Du khách (công khai)** – tiền tố `/api/v1`
 
-| Use case | API |
-|---|---|
-| UC-01 Quét QR / mở web | `POST /analytics/session` (gửi `qr_code`; trả về `poi_id` của điểm gắn với mã QR) |
-| UC-02 Chọn ngôn ngữ | `GET /languages` |
-| UC-03 Xem bản đồ, các điểm | `GET /pois` |
-| UC-04 Lọc theo miền | `GET /regions`, `GET /pois?region=north` |
-| UC-05 Xem chi tiết điểm | `GET /pois/{id}?lang=` |
-| UC-06 Nghe thuyết minh | `audio_url` trong dữ liệu điểm; ghi `play_audio` / `finish_audio` qua `POST /analytics/event` |
-| UC-07 Tải và dùng offline | `GET /offline/manifest?lang=&region=`, `GET /offline/version?lang=&region=` |
-| UC-08 Tự phát khi đến gần | `GET /pois/nearby?lat=&lng=&radius=` (có `inside_trigger`) |
-| UC-11 Fallback 3 tầng | tự động trong mọi API trả nội dung (`lang`, `is_fallback`) |
-| Thống kê người online | `POST /analytics/heartbeat` (mỗi ~30 giây), `POST /analytics/event` |
+| Use case                   | API                                                                                           |
+| -------------------------- | --------------------------------------------------------------------------------------------- |
+| UC-01 Quét QR / mở web     | `POST /analytics/session` (gửi `qr_code`; trả về `poi_id` của điểm gắn với mã QR)             |
+| UC-02 Chọn ngôn ngữ        | `GET /languages`                                                                              |
+| UC-03 Xem bản đồ, các điểm | `GET /pois`                                                                                   |
+| UC-04 Lọc theo miền        | `GET /regions`, `GET /pois?region=north`                                                      |
+| UC-05 Xem chi tiết điểm    | `GET /pois/{id}?lang=`                                                                        |
+| UC-06 Nghe thuyết minh     | `audio_url` trong dữ liệu điểm; ghi `play_audio` / `finish_audio` qua `POST /analytics/event` |
+| UC-07 Tải và dùng offline  | `GET /offline/manifest?lang=&region=`, `GET /offline/version?lang=&region=`                   |
+| UC-08 Tự phát khi đến gần  | `GET /pois/nearby?lat=&lng=&radius=` (có `inside_trigger`)                                    |
+| UC-11 Fallback 3 tầng      | tự động trong mọi API trả nội dung (`lang`, `is_fallback`)                                    |
+| Thống kê người online      | `POST /analytics/heartbeat` (mỗi ~30 giây), `POST /analytics/event`                           |
 
 UC-09 (audio dự phòng bằng TTS trình duyệt) và UC-10 (GPS) làm ở frontend.
 
 **Admin (cần token)** – tiền tố `/api/v1/admin`
 
-| Use case | API |
-|---|---|
-| UC-13 Đăng nhập | `POST /auth/login`, `GET /auth/me`, `POST /auth/change-password` |
-| UC-12 Quản lý tài khoản (Super Admin) | `GET|POST /auth/users`, `PATCH /auth/users/{id}` (đổi vai trò, khóa/mở khóa), `POST /auth/users/{id}/reset-password`, `DELETE /auth/users/{id}` |
-| UC-14 Quản lý mã QR | `GET|POST /qr`, `PATCH /qr/{id}`, `DELETE /qr/{id}` |
-| UC-15 Xem thống kê | `GET /stats/online`, `GET /stats/summary` |
-| UC-16 Bật/tắt hiển thị | `PATCH /pois/{id}/activation` |
-| UC-17 Sửa bản dịch thủ công | `GET /pois/{id}/localizations`, `PUT /pois/{id}/localizations/{lang}` |
-| UC-18 Quản lý điểm | `GET|POST /pois`, `GET|PUT|DELETE /pois/{id}` |
-| UC-19 Sinh bản dịch và audio | tự chạy khi tạo/sửa điểm; chạy tay bằng `POST /pois/{id}/generate-audio` |
+| Use case                              | API                                                                      |
+| ------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | --- | ------------------ |
+| UC-13 Đăng nhập                       | `POST /auth/login`, `GET /auth/me`, `POST /auth/change-password`         |
+| UC-12 Quản lý tài khoản (Super Admin) | `GET                                                                     | POST /auth/users`, `PATCH /auth/users/{id}`(đổi vai trò, khóa/mở khóa),`POST /auth/users/{id}/reset-password`, `DELETE /auth/users/{id}` |
+| UC-14 Quản lý mã QR                   | `GET                                                                     | POST /qr`, `PATCH /qr/{id}`, `DELETE /qr/{id}`                                                                                           |
+| UC-15 Xem thống kê                    | `GET /stats/online`, `GET /stats/summary`                                |
+| UC-16 Bật/tắt hiển thị                | `PATCH /pois/{id}/activation`                                            |
+| UC-17 Sửa bản dịch thủ công           | `GET /pois/{id}/localizations`, `PUT /pois/{id}/localizations/{lang}`    |
+| UC-18 Quản lý điểm                    | `GET                                                                     | POST /pois`, `GET                                                                                                                        | PUT | DELETE /pois/{id}` |
+| UC-19 Sinh bản dịch và audio          | tự chạy khi tạo/sửa điểm; chạy tay bằng `POST /pois/{id}/generate-audio` |
 
 **Mã QR:** in đường dẫn `https://<trang-web>/?qr=<code>` vào mã QR. Khi du khách mở đường dẫn,
 frontend lấy `qr` trên URL và gửi vào `POST /analytics/session`.
@@ -127,13 +127,13 @@ khác nhau thì tải lại.
 
 ## 8. Lỗi thường gặp
 
-| Lỗi | Cách xử lý |
-|---|---|
-| `Can't connect to MySQL server` | MySQL chưa chạy, hoặc sai `DB_HOST/DB_PORT` trong `.env` |
-| `Access denied for user` | Sai `DB_USER/DB_PASSWORD` |
-| `Unknown database 'audio_guide'` | Chưa chạy `schema.sql` |
-| `RuntimeError: 'cryptography' package is required` | `pip install cryptography` |
-| `ModuleNotFoundError: No module named 'app'` | Đang đứng sai thư mục, hãy `cd backend` rồi chạy lại |
-| Bản dịch `failed` | Máy không có internet hoặc bị giới hạn. Xem log trong cửa sổ chạy uvicorn, rồi gọi lại `generate-audio` |
-| Một ngôn ngữ hoàn toàn không xuất hiện trong danh sách bản dịch | Việc dịch bị lỗi trước khi lưu được; xem log và thử `generate-audio` lại |
-| 401 ở trang /docs | Token hết hạn (30 phút), đăng nhập lại và Authorize lại |
+| Lỗi                                                             | Cách xử lý                                                                                              |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `Can't connect to MySQL server`                                 | MySQL chưa chạy, hoặc sai `DB_HOST/DB_PORT` trong `.env`                                                |
+| `Access denied for user`                                        | Sai `DB_USER/DB_PASSWORD`                                                                               |
+| `Unknown database 'audio_guide'`                                | Chưa chạy `schema.sql`                                                                                  |
+| `RuntimeError: 'cryptography' package is required`              | `pip install cryptography`                                                                              |
+| `ModuleNotFoundError: No module named 'app'`                    | Đang đứng sai thư mục, hãy `cd backend` rồi chạy lại                                                    |
+| Bản dịch `failed`                                               | Máy không có internet hoặc bị giới hạn. Xem log trong cửa sổ chạy uvicorn, rồi gọi lại `generate-audio` |
+| Một ngôn ngữ hoàn toàn không xuất hiện trong danh sách bản dịch | Việc dịch bị lỗi trước khi lưu được; xem log và thử `generate-audio` lại                                |
+| 401 ở trang /docs                                               | Token hết hạn (30 phút), đăng nhập lại và Authorize lại                                                 |
