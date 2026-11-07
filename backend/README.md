@@ -46,7 +46,7 @@ Mở trình duyệt: **http://localhost:8000/docs** – đây là trang Swagger,
 6. `GET /api/v1/pois?lang=en` → du khách thấy điểm. Thử `lang=ja` khi chưa có tiếng Nhật để thấy **fallback**.
 7. Mở `http://localhost:8000/static/audio/<tên-file>.mp3` để nghe thử.
 
-> 3 điểm mẫu trong `schema.sql` đã được bật sẵn nhưng chưa có audio.
+> 3 điểm mẫu trong `Thuyet_minh_da_ngon_ngu.sql` đã được bật sẵn nhưng chưa có audio.
 > Muốn có bản dịch + audio cho chúng: `python -m scripts.generate_all_audio`.
 
 ## 5. Chạy test (không cần MySQL, không cần internet)
