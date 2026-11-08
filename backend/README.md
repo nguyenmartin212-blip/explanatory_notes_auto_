@@ -131,7 +131,7 @@ khác nhau thì tải lại.
 | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `Can't connect to MySQL server`                                 | MySQL chưa chạy, hoặc sai `DB_HOST/DB_PORT` trong `.env`                                                |
 | `Access denied for user`                                        | Sai `DB_USER/DB_PASSWORD`                                                                               |
-| `Unknown database 'audio_guide'`                                | Chưa chạy `schema.sql`                                                                                  |
+| `Unknown database 'Thuyet_minh_da_ngon_ngu'`                    | Chưa chạy `thuyet_minh.sql`                                                                             |
 | `RuntimeError: 'cryptography' package is required`              | `pip install cryptography`                                                                              |
 | `ModuleNotFoundError: No module named 'app'`                    | Đang đứng sai thư mục, hãy `cd backend` rồi chạy lại                                                    |
 | Bản dịch `failed`                                               | Máy không có internet hoặc bị giới hạn. Xem log trong cửa sổ chạy uvicorn, rồi gọi lại `generate-audio` |
