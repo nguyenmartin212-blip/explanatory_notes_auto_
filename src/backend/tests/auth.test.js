@@ -5,7 +5,7 @@ import { beforeEach, describe, test } from 'node:test';
 import { authorize, buildContext, extractToken } from '../src/auth/context.js';
 import * as perms from '../src/auth/permissions.js';
 import { ACCESS, REFRESH, createToken, decodeToken, encodeJwt } from '../src/auth/tokens.js';
-import { ConflictError, NotFoundError, PermissionDenied, ValueError } from '../src/core/errors.js';
+import { ConflictError, PermissionDenied, ValueError } from '../src/core/errors.js';
 import * as authService from '../src/services/authService.js';
 import * as roleService from '../src/services/roleService.js';
 import { adminUserStore, roleStore } from '../src/stores/index.js';
