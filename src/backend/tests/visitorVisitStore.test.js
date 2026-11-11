@@ -18,13 +18,13 @@ function makeDb() {
       return doc ? { ...doc } : null;
     },
     async findOne(query) { const doc = docs.find((item) => Object.entries(query).every(([k, v]) => item[k] === v)); return doc ? { ...doc } : null; },
-    find(query, projection) {
+    find(query) {
       let rows = docs.filter((item) => Object.entries(query).every(([k, v]) => item[k] === v));
       return {
         sort(spec) { const [field, direction] = Object.entries(spec)[0]; rows = [...rows].sort((a, b) => (new Date(a[field]) - new Date(b[field])) * direction); return this; },
         skip(n) { rows = rows.slice(n); return this; },
         limit(n) { rows = rows.slice(0, n); return this; },
-        async toArray() { return rows.map(({ _id, ...row }) => row); },
+        async toArray() { return rows.map(({ ...row }) => row); },
       };
     },
     async countDocuments(query) { return docs.filter((item) => Object.entries(query).every(([k, v]) => item[k] === v)).length; },
