@@ -10,6 +10,15 @@ export default tseslint.config(
 
   js.configs.recommended,
 
+  {
+    files: ['src/backend/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
+
   ...tseslint.configs.recommended,
 
   {
