@@ -1,10 +1,8 @@
-node_modules/
-.expo/
-dist/
-web-build/
-coverage/
 .env
-*.log
-.DS_Store
-android/.gradle/
-ios/Pods/
+**/.env
+node_modules/
+dist/
+runtime/
+__pycache__/
+.pytest_cache/
+.venv/

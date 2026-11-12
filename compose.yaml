@@ -1,0 +1,99 @@
+name: go-to-horizon
+
+x-backend: &backend
+  build: ./backend
+  environment:
+    APP_ENV: development
+    MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0
+    MONGO_DB: explanatory_notes
+    REDIS_URL: redis://redis:6379/0
+    JWT_SECRET: ${JWT_SECRET:-}
+    REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:-}
+    SECRET_KEY: ${SECRET_KEY:-}
+    SUPERADMIN_BOOTSTRAP_MODE: env
+    SUPERADMIN_USERNAME: ${SUPERADMIN_USERNAME:-demo-admin}
+    SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:?Set SUPERADMIN_PASSWORD in .env or run start-demo.ps1}
+    PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+    CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-}
+  volumes:
+    - media_runtime:/srv/backend/runtime
+
+services:
+  mongo:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand({ping:1}).ok ? 0 : 1)"]
+      interval: 4s
+      timeout: 5s
+      retries: 20
+
+  mongo-init:
+    image: mongo:7
+    depends_on:
+      mongo:
+        condition: service_healthy
+    entrypoint: ["mongosh", "mongodb://mongo:27017/?directConnection=true", "--quiet", "--eval"]
+    command:
+      - |
+        try {
+          rs.status();
+        } catch (err) {
+          if (err.code !== 94) throw err;
+          rs.initiate({_id: "rs0", members: [{_id: 0, host: "mongo:27017"}]});
+        }
+        for (let i = 0; i < 45; i++) {
+          if (db.hello().isWritablePrimary) quit(0);
+          sleep(1000);
+        }
+        quit(1);
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
+  seed:
+    <<: *backend
+    command: ["python", "-m", "scripts.seed_pois", "--if-empty"]
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+
+  api:
+    <<: *backend
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health/ready', timeout=3).close()"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  web:
+    build: ./frontend
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${WEB_PORT:-5174}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  mongo_data:
+  redis_data:
+  media_runtime:
