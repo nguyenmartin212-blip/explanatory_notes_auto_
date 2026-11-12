@@ -11,6 +11,9 @@ VISITOR_VISITS = "visitor_visits"  # lượt vào / rời điểm tham quan, mã
 
 # Chapter 05 — hỗ trợ đồng bộ dữ liệu POI
 DATASET_META = "dataset_meta"  # bộ đếm dataset_version của POI đã công khai
+DEVICE_PRESENCE = "device_presence"
+DEVICE_USAGE_SESSIONS = "device_usage_sessions"
+
 POI_TOMBSTONES = "poi_tombstones"  # POI đã bị xóa/gỡ công khai, phục vụ removed_poi_ids
 
 # Chapter 08 — UI bundles dịch tự động (long-tail locale)

@@ -13,6 +13,7 @@ from app.stores import (
     analytics_store,
     audio_task_store,
     audit_log_store,
+    device_usage_store,
     poi_dataset_store,
     poi_localization_store,
     poi_store,
@@ -35,6 +36,7 @@ async def seed_roles(db: AsyncIOMotorDatabase) -> int:
     await ui_bundle_store.ensure_indexes(db)
     await visitor_visit_store.ensure_indexes(db)
     await analytics_store.ensure_indexes(db)
+    await device_usage_store.ensure_indexes(db)
     await admin_user_store.backfill_user_ids(db)
     # Roles live in MongoDB and are edited at runtime: only missing defaults are
     # inserted, existing roles are never overwritten.

@@ -10,6 +10,8 @@ import {
 } from 'react-native-web';
 import { useBrowserPois } from '@/features/content/web-hooks';
 import { ADMIN_PERMISSION_GROUPS, hasAdminPermission } from '@/features/admin/permissions';
+import { DeviceUsagePanel } from '@/features/admin/DeviceUsagePanel';
+import { useDeviceHeartbeat } from '@/features/admin/useDeviceHeartbeat';
 import type { Poi } from '@/features/poi/types';
 import {
   AdminApiError,
@@ -26,7 +28,7 @@ import {
   type VisitorVisit,
 } from '@/services/adminApi';
 
-type AdminTab = 'overview' | 'users' | 'roles' | 'visitors';
+type AdminTab = 'overview' | 'users' | 'roles' | 'visitors' | 'devices';
 const PAGE_SIZE = 20;
 
 function formatDate(value?: string | null) {
@@ -85,14 +87,17 @@ export default function AdminDashboardWeb() {
   const canReadRoles = hasAdminPermission(permissions, 'role:read');
   const canUpdateRoles = hasAdminPermission(permissions, 'role:update');
   const canReadVisitors = hasAdminPermission(permissions, 'visitor:read');
+  const canReadDeviceUsage = hasAdminPermission(permissions, 'analytics:read');
+  useDeviceHeartbeat(user?.user_id);
 
   const availableTabs = useMemo(() => {
     const tabs: { id: AdminTab; label: string }[] = [{ id: 'overview', label: 'Tổng quan' }];
     if (canReadUsers) tabs.push({ id: 'users', label: 'Tài khoản' });
     if (canReadRoles) tabs.push({ id: 'roles', label: 'Vai trò & quyền' });
     if (canReadVisitors) tabs.push({ id: 'visitors', label: 'Lượt khách QR' });
+    if (canReadDeviceUsage) tabs.push({ id: 'devices', label: 'Thống kê thiết bị' });
     return tabs;
-  }, [canReadRoles, canReadUsers, canReadVisitors]);
+  }, [canReadRoles, canReadUsers, canReadVisitors, canReadDeviceUsage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -348,7 +353,7 @@ export default function AdminDashboardWeb() {
     );
   }
 
-  const hasAnyAdminRead = canReadUsers || canReadRoles || canReadVisitors;
+  const hasAnyAdminRead = canReadUsers || canReadRoles || canReadVisitors || canReadDeviceUsage;
 
   return (
     <View style={styles.appShell}>
@@ -398,7 +403,7 @@ export default function AdminDashboardWeb() {
               <Text style={styles.eyebrow}>BẢNG ĐIỀU KHIỂN</Text>
               <Text style={styles.pageTitle}>{availableTabs.find((tab) => tab.id === activeTab)?.label ?? 'Quản trị'}</Text>
             </View>
-            <Pressable
+            {activeTab !== 'devices' && <Pressable
               accessibilityRole="button"
               style={styles.refreshButton}
               onPress={() => {
@@ -413,7 +418,7 @@ export default function AdminDashboardWeb() {
               }}
             >
               <Text style={styles.refreshButtonText}>↻ Làm mới</Text>
-            </Pressable>
+            </Pressable>}
           </View>
 
           {notice ? (
@@ -431,7 +436,7 @@ export default function AdminDashboardWeb() {
           {!hasAnyAdminRead ? (
             <View style={styles.emptyCard}>
               <Text style={styles.emptyTitle}>Chưa được cấp quyền quản trị</Text>
-              <Text style={styles.mutedText}>Tài khoản đăng nhập thành công nhưng chưa có quyền xem tài khoản, vai trò hoặc lượt khách.</Text>
+              <Text style={styles.mutedText}>Tài khoản đăng nhập thành công nhưng chưa có quyền truy cập các mục quản trị.</Text>
             </View>
           ) : null}
 
@@ -613,6 +618,8 @@ export default function AdminDashboardWeb() {
               </View>
             </View>
           ) : null}
+
+          {activeTab === 'devices' && canReadDeviceUsage && <DeviceUsagePanel />}
 
           {activeTab === 'visitors' && canReadVisitors ? (
             <View style={styles.card}>

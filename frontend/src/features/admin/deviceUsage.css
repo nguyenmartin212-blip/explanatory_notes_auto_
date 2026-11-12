@@ -1,0 +1,98 @@
+.device-usage {
+  --usage-text: oklch(25% 0.024 150);
+  --usage-muted: oklch(43% 0.026 150);
+  --usage-line: oklch(88% 0.014 150);
+  --usage-surface: oklch(98.5% 0.006 150);
+  --usage-accent: oklch(43% 0.1 151);
+  --usage-accent-hover: oklch(36% 0.09 151);
+  color: var(--usage-text);
+  font: 0.875rem/1.45 system-ui, sans-serif;
+  min-width: 0;
+}
+
+.device-usage__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem;
+  padding-block: 0.75rem 1rem;
+  border-bottom: 1px solid var(--usage-line);
+}
+
+.device-usage__filters label {
+  display: grid;
+  gap: 0.25rem;
+  flex: 1 1 9rem;
+  max-width: 13rem;
+  font-weight: 600;
+}
+
+.device-usage__filters input,
+.device-usage__filters select,
+.device-usage__filters button {
+  font: inherit;
+  border-radius: 0.55rem;
+  padding: 0.5rem 0.65rem;
+  min-height: 2.5rem;
+}
+
+.device-usage__filters input,
+.device-usage__filters select {
+  min-width: 0;
+  border: 1px solid var(--usage-line);
+  background: var(--usage-surface);
+  color: var(--usage-text);
+}
+
+.device-usage__filters button {
+  border: 1px solid transparent;
+  color: var(--usage-surface);
+  background: var(--usage-accent);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.device-usage__filters button:hover { background: var(--usage-accent-hover); }
+.device-usage__filters :focus-visible { outline: 2px solid var(--usage-accent); outline-offset: 2px; }
+
+.device-usage__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem 2.5rem;
+  margin: 1rem 0 0.5rem;
+}
+
+.device-usage__summary dt,
+.device-usage__note {
+  color: var(--usage-muted);
+}
+
+.device-usage__summary dd {
+  margin: 0.1rem 0 0;
+  font: 700 1.5rem/1.25 system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+.device-usage__note { margin: 0.5rem 0; }
+.device-usage__error { color: oklch(43% 0.16 25); }
+.device-usage h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; }
+
+.device-usage__table { overflow-x: auto; }
+.device-usage table { border-collapse: collapse; width: 100%; }
+.device-usage td,
+.device-usage th {
+  border-bottom: 1px solid var(--usage-line);
+  padding: 0.55rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.device-usage thead { background: var(--usage-surface); }
+.device-usage tbody tr:hover { background: var(--usage-surface); }
+.device-usage__id { display: block; color: var(--usage-muted); font-size: 0.78rem; overflow-wrap: anywhere; }
+.device-usage td.device-usage__id { display: table-cell; }
+
+@media (max-width: 560px) {
+  .device-usage__filters label { max-width: none; }
+  .device-usage__filters button { flex: 1 1 100%; }
+}

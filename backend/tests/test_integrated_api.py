@@ -12,8 +12,9 @@ from mongomock_motor import AsyncMongoMockClient
 from app.auth.passwords import default_hasher
 from app.core.config import Settings
 from app.core.errors import GeoQueryUnavailable
+from app.db.collections import AUDIO_TASKS
 from app.main import create_app
-from app.services import content_service, localization_service
+from app.services import audio_sse, content_service, localization_service
 from app.services.audio_recovery import recover_audio_tasks
 from app.services.audio_task_manager import AudioTaskManager
 from app.services.seeding import run_seeding
@@ -239,6 +240,85 @@ async def test_account_lifecycle_and_token_revocation(api):
     assert (await client.patch(f"/admin/users/{operator_id}", headers=root, json={"is_active": False})).status_code == 200
     assert (await client.post("/admin/auth/login", json={"username": "operator", "password": "reset-password"})).status_code == 401
     assert (await client.delete(f"/admin/users/{operator_id}", headers=root)).status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_device_analytics_http_contract(api, monkeypatch):
+    client = api.client
+    heartbeat_path = "/api/analytics/devices/heartbeat"
+    report_path = "/api/analytics/usage"
+    body = {"device_id": "browser:device.01", "device_name": "  Web  "}
+    assert (await client.post(heartbeat_path, json=body)).status_code == 401
+    assert (await client.get(report_path)).status_code == 401
+
+    await login(client)
+    admin = (await client.get("/admin/auth/me")).json()
+
+    async def record(db, *, user_id, device_id, device_name, now):
+        assert user_id == admin["user_id"]
+        assert device_id == body["device_id"]
+        assert device_name == "Web"
+        return {"device_id": device_id, "device_name": device_name, "last_seen_at": now, "session_started": True}
+
+    monkeypatch.setattr("app.stores.device_usage_store.record_heartbeat", record)
+    assert (await client.post(heartbeat_path, json=body)).json()["session_started"] is True
+    assert (await client.post(heartbeat_path, json={"device_id": "invalid id"})).status_code == 422
+    for params in (
+        {"period": "year"},
+        {"from": "2026-11-01"},
+        {"from": "2026-11-31", "to": "2026-12-01"},
+        {"from": "2026-11-05", "to": "2026-11-01"},
+    ):
+        assert (await client.get(report_path, params=params)).status_code == 422
+    report = await client.get(report_path, params={"period": "month", "from": "2026-11-01", "to": "2026-11-30"})
+    assert report.status_code == 200, report.text
+    assert report.json()["timezone"] == "UTC"
+    assert report.json()["to"] == "2026-11-30"
+    assert report.json()["total_sessions"] == 0
+
+    await client.post("/admin/users", json={"username": "visitor", "password": "visitor-password", "role": "user"})
+    await login(client, "visitor", "visitor-password")
+    assert (await client.get(report_path)).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_audio_sse_snapshot_updates_keepalive_and_compatibility(api, monkeypatch):
+    paths = ["/admin/audio-tasks/stream", "/api/v1/admin/pois/audio-tasks/stream"]
+    for path in paths:
+        assert (await api.client.get(path)).status_code == 401
+    await login(api.client)
+    await create_draft(api)
+    actual_stream = audio_sse.event_stream
+
+    async def finite_stream(db, *, is_disconnected, poll_seconds):
+        task = (await audio_task_store.list_recent(db, 1))[0]
+        elapsed = 0
+
+        async def advance(seconds):
+            nonlocal elapsed
+            elapsed += 15
+            if elapsed == 15:
+                # MongoDB timestamps have millisecond precision. A change can share the timestamp.
+                await db[AUDIO_TASKS].update_one({"task_id": task["task_id"]}, {"$inc": {"progress": 1}})
+
+        stream = actual_stream(
+            db, is_disconnected=is_disconnected, poll_seconds=poll_seconds,
+            sleep=advance, clock=lambda: elapsed,
+        )
+        try:
+            for _ in range(3):
+                yield await anext(stream)
+        finally:
+            await stream.aclose()
+
+    monkeypatch.setattr(audio_sse, "event_stream", finite_stream)
+    for path in paths:
+        response = await api.client.get(path)
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        assert response.text.startswith("event: snapshot\n")
+        assert "event: task\n" in response.text
+        assert response.text.endswith(": keepalive\n\n")
 
 
 @pytest.mark.asyncio

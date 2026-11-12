@@ -38,8 +38,12 @@ async def event_stream(
     snapshot = await audio_task_store.list_recent(db, snapshot_limit)
     yield format_sse("snapshot", {"tasks": [task_view(t) for t in snapshot]})
 
-    seen: dict[str, datetime] = {t["task_id"]: t["updated_at"] for t in snapshot if t.get("updated_at")}
-    cursor = max(seen.values(), default=datetime.now(timezone.utc))
+    def signature(task: dict) -> tuple:
+        return (task.get("updated_at"), task.get("status"), task.get("stage"), task.get("progress"))
+
+    seen = {task["task_id"]: signature(task) for task in snapshot if task.get("updated_at")}
+    cursor = max((task["updated_at"] for task in snapshot if task.get("updated_at")),
+                 default=datetime.now(timezone.utc))
     last_sent = clock()
 
     while not await is_disconnected():
@@ -47,9 +51,10 @@ async def event_stream(
         emitted = False
         for doc in await audio_task_store.list_updated_since(db, cursor):
             updated_at = doc.get("updated_at")
-            if updated_at is None or seen.get(doc["task_id"]) == updated_at:
+            current = signature(doc)
+            if updated_at is None or seen.get(doc["task_id"]) == current:
                 continue
-            seen[doc["task_id"]] = updated_at
+            seen[doc["task_id"]] = current
             cursor = max(cursor, updated_at)
             emitted = True
             yield format_sse("task", task_view(doc))

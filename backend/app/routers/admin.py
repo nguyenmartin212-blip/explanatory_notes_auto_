@@ -18,6 +18,7 @@ from app.services import account_service, audio_sse, auth_service, role_service,
 from app.stores import admin_user_store, role_store, visitor_visit_store, poi_store
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+poi_compat_router = APIRouter(prefix="/api/v1/admin/pois", tags=["admin"])
 
 
 class RoleUpdateRequest(BaseModel):
@@ -102,6 +103,7 @@ async def me(ctx: AuthContext = Depends(get_auth_context)):
 # --------------------------------------------------------------------------- #
 # Audio task progress (SSE)
 # --------------------------------------------------------------------------- #
+@poi_compat_router.get("/audio-tasks/stream", deprecated=True)
 @router.get("/audio-tasks/stream")
 async def audio_tasks_stream(request: Request, ctx: AuthContext = Depends(require_permission("audio:manage"))):
     """Server-Sent Events: audio task progress (snapshot, then every change)."""

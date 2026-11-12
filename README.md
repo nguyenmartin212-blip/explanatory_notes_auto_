@@ -39,7 +39,7 @@ Dừng bằng `docker compose down`. Dữ liệu MongoDB, Redis và file audio �
 ## Các luồng có trong gói
 
 - **Web du khách** có danh sách và chi tiết điểm, ngôn ngữ Việt/Anh/Trung, thuyết minh qua trình duyệt, GPS/geofence, quét QR, check-in/check-out, lưu hành trình và bộ nhớ đệm danh sách điểm.
-- **Web quản trị** có đăng nhập, danh sách tài khoản, vai trò và quyền, danh sách lượt khách QR.
+- **Web quản trị** có đăng nhập, danh sách tài khoản, vai trò và quyền, danh sách lượt khách QR và thống kê thiết bị đã đăng nhập theo ngày, tháng hoặc khoảng ngày.
 - **API** có quản lý điểm, bật/tắt công khai, sửa bản dịch, dịch tự động, TTS tạo MP3, hàng đợi và SSE tiến độ, đồng bộ dữ liệu, gói audio ngoại tuyến, QR CRUD, thống kê và vòng đời tài khoản. Thử các chức năng quản trị API ở Swagger sau khi đăng nhập trên cùng trình duyệt.
 - **Dữ liệu mẫu** gồm Hoàng thành Thăng Long, Đại Nội Huế và Chợ Bến Thành. Dữ liệu phát sinh khi chạy được lưu trong volume Docker. Tạo audio và dịch tự động cần kết nối tới Edge TTS và Google Translate. Khi nhà cung cấp dịch giới hạn yêu cầu, các bản dịch mẫu, bản dịch thủ công và cơ chế chọn ngôn ngữ dự phòng vẫn dùng được.
 
