@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import get_db, has_tables
 from app.schemas.analytics import EventRequest, HeartbeatRequest, SessionRequest, SessionResponse
 from app.schemas.common import MessageResponse
 from app.services import analytics_service
@@ -20,6 +20,7 @@ def start_session(data: SessionRequest, db: Session = Depends(get_db)):
         qr_valid=(qr is not None) if data.qr_code else None,
         qr_label=qr.label if qr else None,
         poi_id=qr.poi_id if qr else None,
+        web_visits=has_tables(db, "web_visits"),
     )
 
 
