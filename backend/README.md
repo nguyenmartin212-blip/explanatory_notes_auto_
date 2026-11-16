@@ -8,6 +8,8 @@ Cài và chạy trực tiếp bằng Python 3.12 theo [hướng dẫn ở thư m
 
 Trên Vercel, audio sinh trong lúc chạy nằm ở thư mục tạm của từng instance. Để phục vụ audio lâu dài, lưu tệp trên kho bền vững và dùng URL HTTPS trong bản dịch, hoặc chạy backend ở môi trường có ổ đĩa bền vững.
 
+Với MySQL Aiven, đặt các biến `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` và `DB_PASSWORD` theo máy chủ chính. Dán toàn bộ nội dung chứng chỉ CA của project Aiven vào `DB_SSL_CA_PEM`, gồm hai dòng `BEGIN CERTIFICATE` và `END CERTIFICATE`. Backend dùng chứng chỉ để xác minh máy chủ và hostname qua TLS. Sau khi lưu các biến môi trường, triển khai lại backend.
+
 ## API chính
 
 - `GET /api/v1/pois`, `GET /api/v1/pois/{poi_id}` và `GET /api/v1/pois/nearby` trả POI công khai với miền, tọa độ, ảnh, nội dung theo ngôn ngữ và audio sẵn sàng. Danh sách có `region`, `lang`, `skip` và `limit`.

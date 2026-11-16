@@ -1,3 +1,5 @@
+from ssl import create_default_context
+
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine import Engine, URL, make_url
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
@@ -25,7 +27,12 @@ if DATABASE_URL.get_backend_name() == "sqlite":
         sqlite_args["poolclass"] = StaticPool
     engine = create_engine(DATABASE_URL, **sqlite_args)
 else:
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_recycle=3600)
+    connect_args = {}
+    if settings.DB_SSL_CA_PEM:
+        connect_args["ssl"] = create_default_context(cadata=settings.DB_SSL_CA_PEM)
+    engine = create_engine(
+        DATABASE_URL, connect_args=connect_args, pool_pre_ping=True, pool_recycle=3600,
+    )
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
