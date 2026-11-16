@@ -23,6 +23,7 @@ class Settings:
     DB_USER = os.getenv("DB_USER", "root")
     DB_PASSWORD = os.getenv("DB_PASSWORD", "")
     DB_NAME = os.getenv("DB_NAME", "Thuyet_minh_da_ngon_ngu")
+    DB_SSL_CA_PEM = os.getenv("DB_SSL_CA_PEM", "").strip()
     DATABASE_URL = os.getenv("DATABASE_URL", "")
     DATABASE_CONFIGURED = bool(
         not IS_VERCEL
