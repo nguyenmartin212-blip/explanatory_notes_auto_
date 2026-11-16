@@ -30,3 +30,7 @@ class POI(Base):
         "PoiLocalization", back_populates="poi", cascade="all, delete-orphan"
     )
     images = relationship("PoiImage", cascade="all, delete-orphan")
+
+    @property
+    def image_urls(self):
+        return [image.image_url for image in sorted(self.images, key=lambda image: image.sort_order)]
