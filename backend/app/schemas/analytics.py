@@ -5,17 +5,18 @@ from pydantic import BaseModel, Field
 
 class SessionRequest(BaseModel):
     device_id: str = Field(min_length=8, max_length=36)  # UUID do frontend tạo
-    qr_code: Optional[str] = Field(default=None, max_length=40)
+    qr_code: Optional[str] = Field(default=None, min_length=3, max_length=40, pattern=r"^[A-Za-z0-9_-]+$")
     lang_code: Optional[str] = Field(default=None, max_length=10)
     device_type: Literal["mobile", "tablet", "desktop", "unknown"] = "unknown"
 
 
 class SessionResponse(BaseModel):
-    session_id: int
+    session_id: int | None
     # Chỉ có khi du khách vào bằng mã QR (UC-01):
     qr_valid: Optional[bool] = None    # True = mã QR hợp lệ, False = mã sai/đã tắt, None = không quét QR
     qr_label: Optional[str] = None     # nơi đặt mã QR, ví dụ "QR cổng chính Phố cổ Hội An"
     poi_id: Optional[int] = None       # điểm gắn với mã QR -> frontend mở thẳng trang điểm đó
+    web_visits: bool = False
 
 
 class HeartbeatRequest(BaseModel):
