@@ -11,18 +11,16 @@ from app.stores import analytics_store, poi_store
 # ------------------------------------------------------------ phía du khách
 def start_session(db: Session, data: SessionRequest):
     """Gọi khi du khách quét QR / mở web. Trả về (session_id, qr hoặc None)."""
-    device = analytics_store.get_device(db, data.device_id)
-    if device is None:
-        analytics_store.create_device(db, data.device_id, data.lang_code, data.device_type)
-    else:
-        analytics_store.touch_device(db, device, data.lang_code)
-
     qr = analytics_store.get_qr_by_code(db, data.qr_code) if data.qr_code else None
+    if data.qr_code is not None and qr is None:
+        return None, None
+    analytics_store.ensure_device(db, data.device_id, data.lang_code, data.device_type)
     session = analytics_store.create_session(db, data.device_id, qr.id if qr else None, data.lang_code)
-
+    session_id = session.id
     if qr is not None:
-        analytics_store.add_event(db, session.id, "qr_scan", qr.poi_id, data.lang_code)
-    return session.id, qr
+        analytics_store.add_event(db, session_id, "qr_scan", qr.poi_id, data.lang_code, commit=False)
+    db.commit()
+    return session_id, qr
 
 
 def heartbeat(db: Session, session_id: int) -> None:
@@ -37,8 +35,14 @@ def heartbeat(db: Session, session_id: int) -> None:
 
 
 def add_event(db: Session, session_id: int, event_type: str, poi_id, lang_code) -> None:
+    if event_type == "qr_scan":
+        raise AppError(422, "Sự kiện qr_scan chỉ được ghi sau khi máy chủ xác thực mã QR.")
     if analytics_store.get_session(db, session_id) is None:
         raise AppError(404, "Phiên không tồn tại, hãy tạo phiên mới")
+    if poi_id is not None:
+        poi = poi_store.get(db, poi_id)
+        if poi is None or not poi.is_active:
+            raise AppError(404, "Điểm tham quan không tồn tại hoặc đang ẩn")
     analytics_store.add_event(db, session_id, event_type, poi_id, lang_code)
 
 
