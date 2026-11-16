@@ -6,6 +6,7 @@ không gọi edge-tts lần nữa.
 import asyncio
 import hashlib
 import os
+from tempfile import NamedTemporaryFile
 from pathlib import Path
 
 from app.core.constants import MAX_TTS_CHARS
@@ -17,7 +18,7 @@ AUDIO_URL_PREFIX = "/static/audio/"
 
 async def _save_mp3(text: str, voice: str, path: str) -> None:
     import edge_tts  # nạp khi cần
-    await edge_tts.Communicate(text, voice).save(path)
+    await asyncio.wait_for(edge_tts.Communicate(text, voice).save(path), timeout=60)
 
 
 def make_audio(text: str, lang_code: str, voice: str):
@@ -32,7 +33,8 @@ def make_audio(text: str, lang_code: str, voice: str):
     final_path = AUDIO_DIR / f"{content_hash}.mp3"
 
     if not final_path.exists():  # chưa có trong cache thì mới sinh
-        tmp_path = AUDIO_DIR / f"{content_hash}.tmp"
+        with NamedTemporaryFile(dir=AUDIO_DIR, suffix=".tmp", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
         try:
             asyncio.run(_save_mp3(text, voice, str(tmp_path)))
             os.replace(tmp_path, final_path)  # sinh xong mới đổi tên -> không bao giờ có file dở dang
