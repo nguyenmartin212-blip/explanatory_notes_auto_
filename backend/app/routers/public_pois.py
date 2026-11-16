@@ -29,7 +29,7 @@ def list_languages(db: Session = Depends(get_db)):
 @router.get("/pois", response_model=list[POIPublic])
 def list_pois(
     region: Optional[str] = Query(None, description="Mã miền: north, central, south"),
-    lang: str = Query("vi", description="Mã ngôn ngữ: vi, en, zh, ja, ko"),
+    lang: str = Query("vi", min_length=1, max_length=10, description="Mã ngôn ngữ"),
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -44,7 +44,7 @@ def nearby_pois(
     lat: float = Query(..., ge=-90, le=90),
     lng: float = Query(..., ge=-180, le=180),
     radius: float = Query(500, gt=0, le=50000, description="Bán kính tìm kiếm (mét)"),
-    lang: str = Query("vi"),
+    lang: str = Query("vi", min_length=1, max_length=10),
     db: Session = Depends(get_db),
 ):
     """Các điểm quanh vị trí hiện tại, kèm khoảng cách và cờ 'đang trong vùng kích hoạt'."""
@@ -52,6 +52,6 @@ def nearby_pois(
 
 
 @router.get("/pois/{poi_id}", response_model=POIPublic)
-def get_poi(poi_id: int, lang: str = Query("vi"), db: Session = Depends(get_db)):
+def get_poi(poi_id: int, lang: str = Query("vi", min_length=1, max_length=10), db: Session = Depends(get_db)):
     """Chi tiết một điểm."""
     return poi_service.get_public(db, poi_id, lang)
