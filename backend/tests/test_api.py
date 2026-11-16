@@ -131,7 +131,7 @@ def test_session_with_qr_returns_poi(client, admin_headers):
     assert ok["qr_valid"] is True and ok["poi_id"] == poi_id and ok["qr_label"] == "QR cổng chính"
 
     bad = client.post("/api/v1/analytics/session", json={"device_id": "device-aaaa1111", "qr_code": "khongco"}).json()
-    assert bad["qr_valid"] is False and bad["poi_id"] is None
+    assert bad["qr_valid"] is False and bad["poi_id"] is None and bad["session_id"] is None
 
     none = client.post("/api/v1/analytics/session", json={"device_id": "device-aaaa1111"}).json()
     assert none["qr_valid"] is None

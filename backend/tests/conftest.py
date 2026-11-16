@@ -3,7 +3,7 @@ import os
 
 # Phải đặt TRƯỚC khi import app
 os.environ["DATABASE_URL"] = "sqlite://"
-os.environ["SECRET_KEY"] = "khoa-bi-mat-cho-test"
+os.environ["SECRET_KEY"] = "test-only-key-with-at-least-32-bytes"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,11 +13,11 @@ from app.core.security import hash_password
 from app.database import Base, SessionLocal, engine
 from app.main import app
 from app.models import AdminUser, Language, Region
-from app.services import audio_pipeline_service
+from app.services import audio_pipeline_service, tts_service
 
 
 @pytest.fixture(autouse=True)
-def fresh_db(monkeypatch):
+def fresh_db(monkeypatch, tmp_path):
     """Mỗi test bắt đầu với database sạch + dữ liệu nền (miền, ngôn ngữ, 1 admin)."""
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
@@ -33,6 +33,8 @@ def fresh_db(monkeypatch):
         db.commit()
     # Không gọi dịch/TTS thật khi test (cần internet)
     monkeypatch.setattr(audio_pipeline_service, "generate_for_poi", lambda *a, **k: None)
+    monkeypatch.setattr(tts_service, "AUDIO_DIR", tmp_path)
+    (tmp_path / "test.mp3").write_bytes(b"test fixture")
     yield
 
 
