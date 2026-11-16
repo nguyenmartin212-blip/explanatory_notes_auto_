@@ -4,9 +4,28 @@
 - POIAdmin              : trả cho admin (đầy đủ hơn)
 """
 from datetime import datetime
-from typing import Optional
+from typing import Annotated, Optional
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+
+def validate_image_url(value: str) -> str:
+    if value.startswith("/") and not value.startswith("//") and "\\" not in value:
+        return value
+    url = urlsplit(value)
+    if url.scheme in {"http", "https"} and url.hostname and not url.username:
+        return value
+    raise ValueError("Dùng đường dẫn ảnh /static/... hoặc URL HTTP(S)")
+
+
+ImageUrl = Annotated[str, Field(min_length=1, max_length=500), AfterValidator(validate_image_url)]
+
+
+class CategoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name_vi: str
 
 
 class POICreate(BaseModel):
@@ -18,7 +37,8 @@ class POICreate(BaseModel):
     longitude: float = Field(ge=102, le=110)
     trigger_radius: int = Field(default=50, ge=10, le=500)
     audio_priority: int = Field(default=0, ge=0, le=100)
-    cover_image_url: Optional[str] = Field(default=None, max_length=500)
+    cover_image_url: Optional[ImageUrl] = None
+    image_urls: list[ImageUrl] = Field(default_factory=list, max_length=30)
 
 
 class POIUpdate(BaseModel):
@@ -31,7 +51,8 @@ class POIUpdate(BaseModel):
     longitude: Optional[float] = Field(default=None, ge=102, le=110)
     trigger_radius: Optional[int] = Field(default=None, ge=10, le=500)
     audio_priority: Optional[int] = Field(default=None, ge=0, le=100)
-    cover_image_url: Optional[str] = Field(default=None, max_length=500)
+    cover_image_url: Optional[ImageUrl] = None
+    image_urls: Optional[list[ImageUrl]] = Field(default=None, max_length=30)
 
 
 class POIPublic(BaseModel):
@@ -39,10 +60,13 @@ class POIPublic(BaseModel):
     region_id: int
     name: str
     description: str
+    region_code: str
+    audio_priority: int
     latitude: float
     longitude: float
     trigger_radius: int
     cover_image_url: Optional[str] = None
+    image_urls: list[str] = Field(default_factory=list)
     audio_url: Optional[str] = None
     lang: str                      # ngôn ngữ thực sự của nội dung trả về
     is_fallback: bool              # True nếu phải dùng ngôn ngữ thay thế
@@ -64,6 +88,7 @@ class POIAdmin(BaseModel):
     trigger_radius: int
     audio_priority: int
     cover_image_url: Optional[str] = None
+    image_urls: list[str] = Field(default_factory=list)
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -75,4 +100,9 @@ class ActivationRequest(BaseModel):
 
 class GenerateAudioRequest(BaseModel):
     # None = sinh cho tất cả ngôn ngữ đang bật
-    langs: Optional[list[str]] = None
+    langs: Optional[list[str]] = Field(default=None, min_length=1, max_length=30)
+
+
+class GenerateAudioResponse(BaseModel):
+    detail: str
+    task_id: str | None = None
