@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session, declarative_base, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.config import settings
+from app.core.exceptions import AppError
 
 
 def build_database_url() -> URL:
@@ -53,6 +54,8 @@ def has_tables(db: Session, *names: str) -> bool:
 
 def get_db():
     """Mỗi request mở 1 session, xong thì đóng. Dùng qua Depends(get_db)."""
+    if not settings.DATABASE_CONFIGURED:
+        raise AppError(503, "Backend chưa được cấu hình kết nối MySQL.")
     db = SessionLocal()
     try:
         yield db

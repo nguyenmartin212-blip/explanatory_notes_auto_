@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 from secrets import token_urlsafe
+from tempfile import gettempdir
 
 from dotenv import load_dotenv
 
@@ -10,6 +11,12 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
 class Settings:
+    IS_VERCEL = os.getenv("VERCEL") == "1"
+    STATIC_DIR = (
+        Path(gettempdir()) / "go-to-horizon-static"
+        if IS_VERCEL else Path(__file__).resolve().parent / "static"
+    )
+
     # --- Kết nối MySQL ---
     DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
     DB_PORT = os.getenv("DB_PORT", "3306")
@@ -17,6 +24,11 @@ class Settings:
     DB_PASSWORD = os.getenv("DB_PASSWORD", "")
     DB_NAME = os.getenv("DB_NAME", "Thuyet_minh_da_ngon_ngu")
     DATABASE_URL = os.getenv("DATABASE_URL", "")
+    DATABASE_CONFIGURED = bool(
+        not IS_VERCEL
+        or DATABASE_URL
+        or DB_HOST.strip().lower() not in {"", "127.0.0.1", "localhost", "::1"}
+    )
 
     # --- Đăng nhập admin ---
     SECRET_KEY = os.getenv("SECRET_KEY") or token_urlsafe(48)

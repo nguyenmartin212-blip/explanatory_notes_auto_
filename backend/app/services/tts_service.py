@@ -9,10 +9,11 @@ import os
 from tempfile import NamedTemporaryFile
 from pathlib import Path
 
+from app.config import settings
 from app.core.constants import MAX_TTS_CHARS
 from app.core.exceptions import TTSError
 
-AUDIO_DIR = Path(__file__).resolve().parent.parent / "static" / "audio"
+AUDIO_DIR = settings.STATIC_DIR / "audio"
 AUDIO_URL_PREFIX = "/static/audio/"
 
 

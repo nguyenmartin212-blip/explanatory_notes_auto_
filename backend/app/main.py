@@ -3,11 +3,10 @@
 import asyncio
 
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -21,13 +20,17 @@ from app.routers import admin_pois, admin_stats, analytics, auth, offline, publi
 from app.services.audio_recovery import recover_audio_tasks
 from app.services.audio_worker import run_audio_worker
 
-STATIC_DIR = Path(__file__).resolve().parent / "static"
+STATIC_DIR = settings.STATIC_DIR
 (STATIC_DIR / "audio").mkdir(parents=True, exist_ok=True)
 (STATIC_DIR / "images").mkdir(parents=True, exist_ok=True)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if not settings.DATABASE_CONFIGURED:
+        yield
+        return
+
     database.TABLES = await run_in_threadpool(database.check_schema, engine)
     stop = asyncio.Event()
     worker = None
@@ -78,6 +81,11 @@ app.include_router(web_visits.router)
 app.include_router(web_devices.router)
 
 
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse("/docs")
+
+
 @app.get("/health", tags=["Hệ thống"])
 def health():
     """Kiểm tra server còn sống."""
@@ -86,6 +94,8 @@ def health():
 
 @app.get("/health/ready", tags=["Hệ thống"])
 def ready():
+    if not settings.DATABASE_CONFIGURED:
+        return JSONResponse(status_code=503, content={"status": "not_ready"})
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
