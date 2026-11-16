@@ -1,5 +1,7 @@
 """Điểm khởi động của backend. Chạy: uvicorn app.main:app --reload"""
 
+import asyncio
+
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -7,12 +9,17 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
 
-import app.models  # noqa: F401  (nạp các model để SQLAlchemy biết các bảng)
+from app import database
 from app.config import settings
 from app.core.exceptions import AppError
-from app.database import Base, engine
-from app.routers import admin_pois, admin_stats, analytics, auth, offline, public_pois
+from app.database import engine
+from app.routers import admin_pois, admin_stats, analytics, auth, offline, public_pois, web_auth, web_devices, web_visits
+from app.services.audio_recovery import recover_audio_tasks
+from app.services.audio_worker import run_audio_worker
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 (STATIC_DIR / "audio").mkdir(parents=True, exist_ok=True)
@@ -21,9 +28,19 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Tạo các bảng còn thiếu (nếu đã chạy schema.sql thì bước này không làm gì)
-    Base.metadata.create_all(bind=engine)
-    yield
+    database.TABLES = await run_in_threadpool(database.check_schema, engine)
+    stop = asyncio.Event()
+    worker = None
+    if "audio_tasks" in database.TABLES:
+        await recover_audio_tasks()
+        worker = asyncio.create_task(run_audio_worker(stop))
+    try:
+        yield
+    finally:
+        stop.set()
+        if worker is not None:
+            await worker
+        database.TABLES = None
 
 
 app = FastAPI(
@@ -56,9 +73,22 @@ app.include_router(analytics.router)
 app.include_router(auth.router)
 app.include_router(admin_pois.router)
 app.include_router(admin_stats.router)
+app.include_router(web_auth.router)
+app.include_router(web_visits.router)
+app.include_router(web_devices.router)
 
 
 @app.get("/health", tags=["Hệ thống"])
 def health():
     """Kiểm tra server còn sống."""
     return {"status": "ok"}
+
+
+@app.get("/health/ready", tags=["Hệ thống"])
+def ready():
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except SQLAlchemyError:
+        return JSONResponse(status_code=503, content={"status": "not_ready"})
+    return {"status": "ready"}
