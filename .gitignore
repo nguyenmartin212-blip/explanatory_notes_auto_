@@ -1,8 +1,10 @@
 .env
-**/.env
+.env.*
+!.env.example
 node_modules/
 dist/
 runtime/
 __pycache__/
 .pytest_cache/
 .venv/
+*.py[cod]

@@ -1,45 +1,23 @@
-# Backend FastAPI
+# Backend Go to Horizon
 
-Khởi động toàn bộ ứng dụng với hướng dẫn trong [README gốc](../README.md). Docker Compose ở thư mục gốc cấu hình MongoDB, Redis, backend và Nginx. Backend chạy trên cổng 3000 bên trong mạng Docker, trình duyệt truy cập qua cổng Web.
+Cài và chạy trực tiếp bằng Python 3.12 theo [hướng dẫn ở thư mục gốc](../README.md). Lúc khởi động, Backend chỉ kiểm tra các bảng của schema đã nhập. Biến `DATABASE_URL` có thể dùng trong môi trường kiểm thử. Cách chạy thông thường lấy thông số MySQL từ `backend/.env`.
 
-Để phát triển backend trực tiếp trên máy, dùng Python 3.12, tạo môi trường ảo, cài `requirements.txt` và sao chép `.env.example` sang `.env`. Đặt `MONGO_URI` và `REDIS_URL` trỏ đến các dịch vụ có thể truy cập, rồi chạy `python -m uvicorn app.main:app --port 3000`. Có thể nạp dữ liệu mẫu bằng `python -m scripts.seed_pois --if-empty`.
+## API chính
 
-## Các API chính
+- `GET /api/v1/pois`, `GET /api/v1/pois/{poi_id}` và `GET /api/v1/pois/nearby` trả POI công khai với miền, tọa độ, ảnh, nội dung theo ngôn ngữ và audio sẵn sàng. Danh sách có `region`, `lang`, `skip` và `limit`.
+- `GET /api/v1/regions` và `GET /api/v1/languages` nạp lựa chọn từ MySQL.
+- `POST /api/v1/analytics/session` xác thực `qr_codes` khi nhận `qr_code`. Mã sai hoặc bị tắt trả `qr_valid: false` và `session_id: null`. Mã hợp lệ cập nhật thiết bị, mở phiên và ghi lượt quét trong cùng giao dịch. `/heartbeat` gia hạn phiên. `/event` tiếp nhận lượt xem và tương tác audio.
+- `GET /api/v1/offline/manifest` và `GET /api/v1/offline/version` cung cấp gói dữ liệu công khai.
+- API quản trị hỗ trợ Bearer và cookie. Super Admin có quyền tạo, sửa quyền và quản lý tài khoản. Khởi tạo tài khoản đầu tiên bằng `python -m scripts.init_admin` khi có nhu cầu.
 
-| Chức năng | API |
-|---|---|
-| Điểm công khai và đồng bộ | `GET /pois` cho frontend hiện tại, `GET /poi/load-all` để đồng bộ đầy đủ hoặc theo cursor, `GET /poi/nearby` để tìm gần |
-| Danh mục và lọc theo miền | `GET /api/v1/regions`, `GET /api/v1/languages`, `GET /api/v1/pois?region=north&lang=en`, `GET /api/v1/pois/{poi_id}`, `GET /api/v1/pois/nearby` |
-| Quản trị điểm và bản dịch | `GET/POST /admin/pois`, `GET/PATCH/DELETE /admin/pois/{poi_id}`, `PATCH /admin/pois/{poi_id}/activation`, `GET /admin/pois/{poi_id}/localizations`, `PUT /admin/pois/{poi_id}/localizations/{lang}` |
-| Dịch, TTS và tác vụ audio | `POST /localizations/on-demand`, `POST /localizations/prepare-hotset`, `POST /localizations/warmup`, `POST /audio/tts`, `POST /admin/pois/{poi_id}/generate-audio`, `GET /admin/audio-tasks`, `GET /admin/audio-tasks/stream`, `POST /admin/audio-tasks/{task_id}/{action}` |
-| Ngoại tuyến | `GET /api/v1/offline/manifest?region=central&lang=vi`, `GET /api/v1/offline/version` và `GET /audio/pack-manifest`. Client lưu nội dung và MP3 trên thiết bị. |
-| QR và thống kê | `GET/POST /api/v1/admin/qr`, `PATCH/DELETE /api/v1/admin/qr/{qr_id}`, `POST /api/v1/analytics/session`, `POST /api/v1/analytics/heartbeat`, `POST /api/v1/analytics/event`, `GET /api/v1/admin/stats/online`, `GET /api/v1/admin/stats/summary` |
-| Thống kê thiết bị đăng nhập | `POST /api/analytics/devices/heartbeat`, `GET /api/analytics/usage?period=day` |
-| Lượt ghé và hành trình | `POST /api/visitors/check-in`, `POST /api/visitors/check-out`, `POST /api/visitors/itinerary`, `GET /admin/visitor-visits` |
-| Tài khoản, quyền và giao diện | `/admin/auth/login`, `/admin/auth/refresh`, `/admin/auth/logout`, `/admin/auth/change-password`, `/admin/users`, `/admin/users/{user_id}/reset-password`, `/admin/users/{user_id}/role`, `/admin/roles`, `GET /api/v1/ui-bundles/{locale}` |
+## Các bảng Web tùy chọn
 
-Điểm tham quan dùng `poi_id` kiểu chuỗi. Khi tạo điểm, gửi bản gốc trong `localizations.vi` và chọn `region_code` là `north`, `central` hoặc `south` nếu muốn phân miền. Backend tự xếp hàng tạo nội dung còn thiếu và audio. Bản dịch thủ công đầy đủ được giữ khi chạy lại pipeline. Google Translate và Edge TTS cần Internet.
+SQL gốc chưa có bảng cho lịch sử check-in/check-out Web, lưu lộ trình, thống kê thiết bị quản trị, chỉnh quyền chi tiết, lưu phiên đăng nhập Web hoặc hàng đợi audio bền vững. Bản đồ, QR, ghi nhận du khách, API thống kê, CRUD, bản dịch và gói ngoại tuyến dùng các bảng gốc.
 
-Để thu thống kê mới, client gửi mã QR vào `/api/v1/analytics/session` cùng ID thiết bị ẩn danh. Backend trả `session_id` và `poi_id` nếu mã trỏ đến điểm đang công khai. Client gửi heartbeat khoảng mỗi 30 giây và ghi `view_poi`, `play_audio`, `finish_audio` khi các sự kiện xảy ra. Báo cáo online đếm thiết bị có heartbeat trong 90 giây. API check-in/check-out của frontend hiện tại tiếp tục ghi lượt ghé độc lập. Muốn frontend hiện tại gửi các sự kiện thống kê mới hoặc có màn hình quản lý QR, cần nối thêm các API tương ứng ở frontend.
+Không cần bổ sung bảng để dùng schema gốc. Nếu đúng là bạn muốn bật lại các tính năng phụ với chính MySQL đó, `python -m scripts.bootstrap --install-web-tables` tạo các bảng thiếu của bản cũ, không nạp dữ liệu. Khởi động lại Backend sau khi chạy. Chạy một tiến trình API khi dùng worker phục hồi tác vụ.
 
-Các route và dữ liệu của MySQL trên nhánh `edit` dùng ID số. Khi nhập dữ liệu MySQL cũ, cần ánh xạ sang các document MongoDB và ID chuỗi trong backend này.
-
-## Thống kê thiết bị đăng nhập
-
-Trang quản trị Web tự gửi `device_id` của trình duyệt mỗi 45 giây khi tài khoản đã đăng nhập và trang đang hiển thị. Thiết bị được tính là online trong 2 phút sau heartbeat cuối. Phiên mới bắt đầu khi thiết bị gửi heartbeat đầu tiên hoặc quay lại sau hơn 30 phút. MongoDB replica set lưu thời điểm hoạt động và phiên mới trong cùng một giao dịch.
-
-`GET /api/analytics/usage` yêu cầu quyền `analytics:read`. Dùng `period=day` cho 30 ngày UTC gần nhất hoặc `period=month` cho tháng hiện tại và 11 tháng trước. Có thể truyền đồng thời `from` và `to` theo định dạng `YYYY-MM-DD`, tính cả hai ngày. Một thiết bị được xác định theo cặp tài khoản và mã trình duyệt. Các API du khách ở `/api/v1/analytics` ghi nhận phiên và lượt quét QR riêng.
-
-Luồng SSE audio dùng `GET /admin/audio-tasks/stream`. Đường dẫn `GET /api/v1/admin/pois/audio-tasks/stream` của PR #5 dùng chung quyền `audio:manage` và các sự kiện `snapshot`, `task`, `keepalive`.
+Khi thiếu bảng `audio_tasks`, thao tác tạo audio vẫn gọi Google Translate và Edge TTS ở chế độ chạy nền. Xem kết quả trong danh sách bản dịch. Trạng thái hàng đợi qua SSE và phục hồi tác vụ cần bảng `audio_tasks`.
 
 ## Kiểm thử
 
-```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements-test.txt
-.\.venv\Scripts\python.exe -m compileall -q app scripts tests
-.\.venv\Scripts\python.exe -m pytest -q
-```
-
-Đặt `TEST_MONGO_URI` trỏ tới MongoDB replica set để chạy thêm bài test ghi heartbeat đồng thời và tổng hợp phiên theo UTC. Test tạo cơ sở dữ liệu riêng rồi xóa cơ sở dữ liệu đó khi kết thúc. GitHub Actions tự khởi tạo replica set để chạy bài test này.
-
-Các test API kiểm tra phân quyền, thu hồi token sau đổi mật khẩu, QR và thống kê, lượt ghé, kích hoạt điểm, đồng bộ điểm đã gỡ, gói ngoại tuyến, ưu tiên bản dịch thủ công và phục hồi tác vụ audio. Test sử dụng MongoDB và Redis giả lập, đồng thời giả lập dịch văn bản. Kiểm tra thực tế bằng `/health/ready` và tạo audio sau khi các dịch vụ thật đã chạy.
+Chạy `python -m pytest -q` trong `backend`. Test sử dụng SQLite trong bộ nhớ và dữ liệu riêng của test. Test không kết nối MySQL đang dùng.

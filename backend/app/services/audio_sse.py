@@ -1,65 +1,45 @@
-"""Server-Sent Events stream of audio task progress.
-
-GET /admin/audio-tasks/stream sends:
-  event: snapshot   the most recent tasks, once, when the client connects
-  event: task       every time a task changes (status, stage or progress)
-  : keepalive       a comment line while nothing changes
-
-Changes are read from the database (the `updated_at` of each task), not from
-in-process events, so the stream works with several worker processes.
-"""
-
-from __future__ import annotations
-
+"""Snapshot, task updates and keepalive events from the Extra branch."""
 import asyncio
 import json
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import timezone
 
-from app.services.audio_task_manager import task_view
-from app.stores import audio_task_store
+from starlette.concurrency import run_in_threadpool
+
+from app.stores.audio_task_store import AudioTaskStore, utc_now
 
 
-def format_sse(event: str, data: dict) -> str:
+def format_sse(event, data):
+    if event == "keepalive":
+        return ": keepalive\n\n"
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-async def event_stream(
-    db,
-    *,
-    is_disconnected: Callable[[], Awaitable[bool]],
-    poll_seconds: float = 1.0,
-    keepalive_seconds: float = 15.0,
-    snapshot_limit: int = 100,
-    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-    clock: Callable[[], float] = time.monotonic,
-) -> AsyncIterator[str]:
-    snapshot = await audio_task_store.list_recent(db, snapshot_limit)
-    yield format_sse("snapshot", {"tasks": [task_view(t) for t in snapshot]})
+def task_view(doc):
+    return {**doc, "updated_at": doc["updated_at"].replace(tzinfo=timezone.utc).isoformat()}
 
-    def signature(task: dict) -> tuple:
-        return (task.get("updated_at"), task.get("status"), task.get("stage"), task.get("progress"))
 
-    seen = {task["task_id"]: signature(task) for task in snapshot if task.get("updated_at")}
-    cursor = max((task["updated_at"] for task in snapshot if task.get("updated_at")),
-                 default=datetime.now(timezone.utc))
-    last_sent = clock()
+async def event_stream(is_disconnected, poll_seconds=1.0, keepalive_seconds=15.0, snapshot_limit=100):
+    def signature(doc):
+        return (doc["updated_at"], doc["status"], doc["stage"], doc["progress"], doc["error"])
+
+    cursor = utc_now().replace(microsecond=0)
+    snapshot = await run_in_threadpool(AudioTaskStore.list_recent, snapshot_limit)
+    seen = {doc["task_id"]: signature(doc) for doc in snapshot}
+    yield format_sse("snapshot", {"tasks": [task_view(doc) for doc in snapshot]})
+    last_sent = time.monotonic()
 
     while not await is_disconnected():
-        await sleep(poll_seconds)
-        emitted = False
-        for doc in await audio_task_store.list_updated_since(db, cursor):
-            updated_at = doc.get("updated_at")
+        await asyncio.sleep(poll_seconds)
+        for doc in await run_in_threadpool(AudioTaskStore.list_updated_since, cursor):
             current = signature(doc)
-            if updated_at is None or seen.get(doc["task_id"]) == current:
+            cursor = max(cursor, doc["updated_at"])
+            if seen.get(doc["task_id"]) == current:
                 continue
             seen[doc["task_id"]] = current
-            cursor = max(cursor, updated_at)
-            emitted = True
+            last_sent = time.monotonic()
             yield format_sse("task", task_view(doc))
-        if emitted:
-            last_sent = clock()
-        elif clock() - last_sent >= keepalive_seconds:
-            last_sent = clock()
-            yield ": keepalive\n\n"
+        seen = {key: value for key, value in seen.items() if value[0] >= cursor}
+        if time.monotonic() - last_sent >= keepalive_seconds:
+            last_sent = time.monotonic()
+            yield format_sse("keepalive", None)

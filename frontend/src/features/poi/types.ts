@@ -1,15 +1,19 @@
-import type { LocalizedText } from '@/types';
+export type PoiContent = {
+  name: string;
+  description: string;
+  audio_url: string | null;
+  lang: string;
+  is_fallback: boolean;
+};
 
 export type Poi = {
   id: string;
-  name: LocalizedText;
-  description: LocalizedText;
+  backendId: number;
+  regionCode: string;
+  content: PoiContent;
   latitude: number;
   longitude: number;
   radiusMeters: number;
   priority: number;
   images: string[];
-  mapUrl?: string;
-  audio?: Partial<Record<'vi' | 'en' | 'zh' | 'ko', string>>;
-  ttsScript?: LocalizedText;
 };

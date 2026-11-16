@@ -1,18 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { Pressable, StyleSheet, Text, View } from 'react-native-web';
-import { useBrowserPois } from '@/features/content/web-hooks';
-import { parsePoiQr } from '@/features/qr/services/qr-content';
+import { getUrlLanguage, HeritageHeader, Icon, interfaceLanguage, LanguageSelect, saveLanguage } from '../design/Heritage';
+import { useVisitorOptions } from '@/features/content/web-hooks';
+import { parseManagedQr } from '@/features/qr/services/qr-content';
 
 const SCANNER_ELEMENT_ID = 'web-visitor-qr-reader';
+const messages = {
+  vi: { back: 'Về trang khám phá', title: 'Quét mã QR', instruction: 'Đưa mã QR tại điểm tham quan vào giữa khung hình.', loading: 'Đang tải danh sách điểm đến…', off: 'Camera đang tắt', starting: 'Đang mở camera…', stop: 'Tắt camera', start: 'Bật camera và quét', permission: 'Cho phép trình duyệt dùng camera để quét mã. Trang web cần HTTPS khi truy cập từ thiết bị khác.', invalid: 'Mã QR không hợp lệ hoặc chưa có dữ liệu điểm tham quan.', cameraError: 'Không thể mở camera.' },
+  en: { back: 'Back to Explore', title: 'Scan QR code', instruction: 'Position the destination’s QR code in the center of the frame.', loading: 'Loading destinations…', off: 'Camera is off', starting: 'Opening camera…', stop: 'Turn camera off', start: 'Turn on camera and scan', permission: 'Allow camera access to scan the code. HTTPS is required when accessing the site from another device.', invalid: 'The QR code is invalid or the destination is unavailable.', cameraError: 'Unable to open the camera.' },
+  zh: { back: '返回探索', title: '扫描二维码', instruction: '将景点二维码放在取景框中央。', loading: '正在加载景点…', off: '摄像头已关闭', starting: '正在开启摄像头…', stop: '关闭摄像头', start: '开启摄像头并扫描', permission: '请允许浏览器访问摄像头。从其他设备访问此网站时需要 HTTPS。', invalid: '二维码无效或该景点不可用。', cameraError: '无法开启摄像头。' },
+};
 
 export default function QrScannerScreenWeb() {
-  const { pois, isLoading } = useBrowserPois();
+  const { languages } = useVisitorOptions();
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const handlingScanRef = useRef(false);
   const [isScanning, setIsScanning] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
-  const [error, setError] = useState('');
+  const [lang, setLang] = useState(getUrlLanguage);
+  const [error, setError] = useState<'invalid' | 'cameraError' | null>(null);
+  const t = messages[interfaceLanguage(lang)];
+  const openImageText = { vi: 'Đọc ảnh QR', en: 'Read a QR image', zh: '读取二维码图片' }[interfaceLanguage(lang)];
 
   useEffect(() => () => {
     const scanner = scannerRef.current;
@@ -34,27 +42,28 @@ export default function QrScannerScreenWeb() {
   const handleScan = async (rawValue: string) => {
     if (handlingScanRef.current) return;
     handlingScanRef.current = true;
-    setError('');
-    await stopScanner();
-
-    const payload = parsePoiQr(rawValue);
-    const poi = payload && pois.find((item) => item.id === payload.poiId);
-    if (!poi) {
-      setError('Mã QR không hợp lệ hoặc chưa có dữ liệu điểm tham quan.');
+    setError(null);
+    try { await stopScanner(); } catch {
+      setError('cameraError');
       handlingScanRef.current = false;
       return;
     }
 
-    window.localStorage.setItem('qr_activated_station', poi.id);
-    const destination = new URL(window.location.href);
-    destination.searchParams.delete('scan');
-    destination.searchParams.set('visit', '1');
-    destination.searchParams.set('poi', poi.id);
+    const code = parseManagedQr(rawValue);
+    if (!code) {
+      setError('invalid');
+      handlingScanRef.current = false;
+      return;
+    }
+
+    const destination = new URL('/', window.location.origin);
+    destination.searchParams.set('lang', lang);
+    destination.searchParams.set('qr', code);
     window.location.replace(destination.toString());
   };
 
   const startScanner = async () => {
-    setError('');
+    setError(null);
     handlingScanRef.current = false;
     setIsStarting(true);
     let scanner: Html5Qrcode | null = null;
@@ -67,178 +76,80 @@ export default function QrScannerScreenWeb() {
       scannerRef.current = scanner;
       await scanner.start(
         { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 240, height: 240 } },
+        { fps: 10, qrbox: (width, height) => {
+          const size = Math.floor(Math.min(width, height, 320) * 0.72);
+          return { width: size, height: size };
+        } },
         (decodedText) => { void handleScan(decodedText); },
         () => undefined,
       );
       setIsScanning(true);
-    } catch (scanError) {
+    } catch {
       scannerRef.current = null;
       setIsScanning(false);
-      setError(
-        scanError instanceof Error
-          ? `Không thể mở camera: ${scanError.message}`
-          : 'Không thể mở camera. Hãy cấp quyền camera và dùng HTTPS hoặc localhost.',
-      );
+      setError('cameraError');
       scanner?.clear();
     } finally {
       setIsStarting(false);
     }
   };
 
+  const readImage = async (file: File) => {
+    handlingScanRef.current = false;
+    setIsStarting(true);
+    setError(null);
+    try {
+      await stopScanner();
+      const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID, {
+        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+        verbose: false,
+      });
+      const decoded = await scanner.scanFile(file, false);
+      await handleScan(decoded);
+    } catch {
+      setError('invalid');
+    } finally {
+      setIsStarting(false);
+    }
+  };
+
   return (
-    <View style={styles.container}>
-      <View style={styles.card}>
-        <Text style={styles.brand}>GO TO HORIZON</Text>
-        <Text style={styles.title}>Quét QR điểm tham quan</Text>
-        <Text style={styles.subtitle}>
-          Cho phép camera, sau đó hướng mã QR vào khung. Mã hợp lệ sẽ ghi nhận lượt vào cho điểm tham quan.
-        </Text>
-
-        <View style={styles.cameraFrame}>
-          <View nativeID={SCANNER_ELEMENT_ID} style={styles.cameraMount} />
+    <main className="heritage-scanner" lang={lang}>
+      <HeritageHeader><LanguageSelect value={lang} languages={languages} onChange={(value) => {
+        saveLanguage(value);
+        setLang(value);
+      }} /></HeritageHeader>
+      <section className="heritage-scan-body">
+        <a href={`/?lang=${lang}`}><Icon name="back" />{t.back}</a>
+        <h1 className="heritage-title">{t.title}</h1>
+        <p>{t.instruction}</p>
+        <div className="heritage-camera">
+          <div id={SCANNER_ELEMENT_ID} />
           {!isScanning && (
-            <View style={styles.cameraOverlay}>
-              <Text style={styles.cameraIcon}>▦</Text>
-              <Text style={styles.cameraHint}>
-                {isLoading ? 'Đang tải danh sách điểm đến…' : 'Camera chưa được bật'}
-              </Text>
-            </View>
+            <div className="heritage-camera-overlay">
+              <div className="heritage-camera-guide"><Icon name="camera" />
+                <span role="status">{t.off}</span>
+              </div>
+            </div>
           )}
-        </View>
-
-        {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-
-        <Pressable
-          accessibilityRole="button"
-          disabled={isLoading || isStarting}
-          style={[styles.button, (isLoading || isStarting) && styles.buttonDisabled]}
-          onPress={() => {
-            if (isScanning) {
-              void stopScanner();
-            } else {
-              void startScanner();
-            }
-          }}
+        </div>
+        {error && <p className="heritage-error" role="alert">{t[error]}</p>}
+        <button
+          className="heritage-button heritage-primary"
+          disabled={isStarting}
+          onClick={() => void (isScanning ? stopScanner() : startScanner())}
         >
-          <Text style={styles.buttonText}>
-            {isStarting ? 'Đang mở camera…' : isScanning ? 'Tắt camera' : 'Bật camera và quét'}
-          </Text>
-        </Pressable>
-        <Text style={styles.note}>
-          Trình duyệt cần quyền camera. Khi truy cập từ thiết bị khác, trang web phải dùng HTTPS.
-        </Text>
-      </View>
-    </View>
+          <Icon name="camera" />{isStarting ? t.starting : isScanning ? t.stop : t.start}
+        </button>
+        <label className="heritage-qr-file">{openImageText}
+          <input type="file" accept="image/*" disabled={isStarting} onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = '';
+            if (file) void readImage(file);
+          }} />
+        </label>
+        <p className="heritage-scan-note">{t.permission}</p>
+      </section>
+    </main>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    minHeight: '100%',
-    backgroundColor: '#F3F7F4',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  card: {
-    width: '100%',
-    maxWidth: 520,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    padding: 28,
-    borderWidth: 1,
-    borderColor: '#DDE9E2',
-    shadowColor: '#173B2D',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.1,
-    shadowRadius: 28,
-    elevation: 5,
-  },
-  brand: {
-    color: '#247453',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 1.8,
-    textAlign: 'center',
-  },
-  title: {
-    color: '#183A2C',
-    fontSize: 25,
-    fontWeight: '800',
-    textAlign: 'center',
-    marginTop: 9,
-  },
-  subtitle: {
-    color: '#687B70',
-    fontSize: 14,
-    lineHeight: 21,
-    textAlign: 'center',
-    marginTop: 10,
-    marginBottom: 22,
-  },
-  cameraFrame: {
-    position: 'relative',
-    minHeight: 300,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#DCE8E0',
-    borderRadius: 18,
-    backgroundColor: '#F5F8F6',
-  },
-  cameraMount: {
-    minHeight: 300,
-    width: '100%',
-  },
-  cameraOverlay: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F5F8F6',
-    pointerEvents: 'none',
-  },
-  cameraIcon: {
-    color: '#78A58D',
-    fontSize: 56,
-    fontWeight: '700',
-  },
-  cameraHint: {
-    color: '#687B70',
-    fontSize: 14,
-    marginTop: 8,
-  },
-  error: {
-    color: '#B42318',
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 14,
-    textAlign: 'center',
-  },
-  button: {
-    backgroundColor: '#247453',
-    borderRadius: 13,
-    paddingVertical: 15,
-    alignItems: 'center',
-    marginTop: 18,
-  },
-  buttonDisabled: {
-    opacity: 0.55,
-  },
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  note: {
-    color: '#7B8C82',
-    fontSize: 12,
-    lineHeight: 18,
-    textAlign: 'center',
-    marginTop: 14,
-  },
-});

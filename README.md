@@ -1,52 +1,46 @@
-# Go to Horizon — Bản Web đầy đủ
+# Go to Horizon
 
-Gói mã nguồn gồm frontend React + Vite, backend FastAPI, MongoDB replica set, Redis, Nginx và dữ liệu mẫu. Giao diện Web dùng React Native Web để tái sử dụng các màn hình đã kiểm thử. Vite biên dịch trực tiếp cho trình duyệt.
+Frontend chạy bằng Vite và Backend chạy bằng FastAPI. Dữ liệu du lịch lấy từ MySQL `Thuyet_minh_da_ngon_ngu` qua API. Tệp [thuyet_minh.sql](thuyet_minh.sql) chứa schema và dữ liệu mẫu.
 
-## Chạy trên Windows
+## Chuẩn bị MySQL
 
-1. Giải nén ZIP. Mở Docker Desktop và chờ Docker Engine sẵn sàng.
-2. Mở PowerShell tại thư mục có `compose.yaml`.
-3. Chạy lệnh sau.
+Máy cần MySQL, Python 3.12 và Node.js 22. Có thể tải MySQL Community Server trực tiếp từ trang chính thức. [MySQL Community Server](https://dev.mysql.com/downloads/mysql/)
+
+1. Khởi động MySQL. Nếu schema chưa được nhập, mở file SQL đi kèm bằng MySQL Workbench và chạy một lần. Nếu đã có schema và dữ liệu, giữ bộ dữ liệu đang dùng.
+2. Dùng hai cửa sổ PowerShell, bắt đầu ở thư mục gốc của repo.
+
+### Backend
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\start-demo.ps1
+Set-Location backend
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
 
-Lần đầu script tạo `.env` với mật khẩu admin ngẫu nhiên. Docker Compose dựng frontend và backend, khởi tạo MongoDB replica set, nạp ba điểm mẫu nếu kho điểm còn trống, rồi khởi động API và Web. Lần đầu có thể mất vài phút để tải image và thư viện.
+Điền `DB_USER`, `DB_PASSWORD`, `DB_HOST` và `DB_PORT` trong `backend/.env` theo MySQL của bạn. Giữ `DB_NAME=Thuyet_minh_da_ngon_ngu`. Đặt `SECRET_KEY` bằng một chuỗi ngẫu nhiên riêng nếu triển khai.
 
-| Trang | URL mặc định |
-|---|---|
-| Du khách | [localhost:5174](http://localhost:5174/) |
-| QR mẫu Hoàng thành Thăng Long | [Mở liên kết QR](http://localhost:5174/?visit=1&poi=hanoi-thang-long) |
-| Quét QR | [Mở camera](http://localhost:5174/?scan=1) |
-| Quản trị | [localhost:5174/admin](http://localhost:5174/admin) |
-| Swagger API | [localhost:5174/docs](http://localhost:5174/docs) |
-| Trạng thái dịch vụ | [localhost:5174/health/ready](http://localhost:5174/health/ready) |
-
-Dùng `SUPERADMIN_USERNAME` và `SUPERADMIN_PASSWORD` trong `.env` để đăng nhập. Nếu cổng `5174` đang bận, đổi `WEB_PORT` trong `.env` rồi chạy lại script. MongoDB, Redis và API giao tiếp qua mạng Docker riêng. Web và API dùng chung origin, nên cookie admin dùng được trực tiếp từ trình duyệt và Swagger.
-
-## Chạy bằng Docker Compose trên hệ điều hành khác
-
-Sao chép `.env.example` thành `.env`, điền mật khẩu admin riêng có ít nhất 8 ký tự, tối đa 72 byte, rồi chạy:
-
-```sh
-docker compose up -d --build --wait
-docker compose ps
+```powershell
+.\.venv\Scripts\python.exe -m scripts.check_db
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 3000
 ```
 
-Dừng bằng `docker compose down`. Dữ liệu MongoDB, Redis và file audio được lưu trong các volume. Chạy `docker compose logs -f api web` để xem log.
+### Frontend
 
-## Các luồng có trong gói
+```powershell
+Set-Location frontend
+npm.cmd ci
+npm.cmd run dev
+```
 
-- **Web du khách** có danh sách và chi tiết điểm, ngôn ngữ Việt/Anh/Trung, thuyết minh qua trình duyệt, GPS/geofence, quét QR, check-in/check-out, lưu hành trình và bộ nhớ đệm danh sách điểm.
-- **Web quản trị** có đăng nhập, danh sách tài khoản, vai trò và quyền, danh sách lượt khách QR và thống kê thiết bị đã đăng nhập theo ngày, tháng hoặc khoảng ngày.
-- **API** có quản lý điểm, bật/tắt công khai, sửa bản dịch, dịch tự động, TTS tạo MP3, hàng đợi và SSE tiến độ, đồng bộ dữ liệu, gói audio ngoại tuyến, QR CRUD, thống kê và vòng đời tài khoản. Thử các chức năng quản trị API ở Swagger sau khi đăng nhập trên cùng trình duyệt.
-- **Dữ liệu mẫu** gồm Hoàng thành Thăng Long, Đại Nội Huế và Chợ Bến Thành. Dữ liệu phát sinh khi chạy được lưu trong volume Docker. Tạo audio và dịch tự động cần kết nối tới Edge TTS và Google Translate. Khi nhà cung cấp dịch giới hạn yêu cầu, các bản dịch mẫu, bản dịch thủ công và cơ chế chọn ngôn ngữ dự phòng vẫn dùng được.
+Mở [trang du khách](http://localhost:5173/) hoặc [trang quản trị](http://localhost:5173/admin). Swagger ở [cổng 3000](http://127.0.0.1:3000/docs). Dùng `npm.cmd run build` và `npm.cmd run preview` để chạy bản build hỗ trợ tải gói ngoại tuyến ở [cổng 4173](http://127.0.0.1:4173/).
 
-Camera và GPS của trình duyệt dùng được trên localhost hoặc HTTPS, với quyền tương ứng của người dùng. Compose trong gói dành cho chạy local và chỉ công bố cổng Web trên loopback.
+Khi triển khai, phục vụ `frontend/dist` qua HTTPS và chuyển tiếp API cùng origin sang FastAPI, gồm `/api/`, `/admin/` (các đường dẫn con), `/pois` và `/static/`. Trả `index.html` cho các đường dẫn giao diện như `/admin` và `/poi/<id>`. Duy trì thư mục `backend/app/static/audio` trên bộ lưu trữ lâu dài nếu tạo audio trên máy chủ.
 
-## Mã nguồn và kiểm thử
+## Dữ liệu của bản SQL
 
-- `frontend/` chứa màn hình Web, `package-lock.json`, cấu hình Vite và Nginx. Có thể chạy `npm ci`, `npm run typecheck` và `npm run build`.
-- `backend/` chứa API, cấu hình mẫu, script seed và bộ kiểm thử. Xem [tài liệu backend](backend/README.md) để tra endpoint.
-- `compose.yaml` kết nối các dịch vụ. `start-demo.ps1` tạo cấu hình local và chạy Compose.
+- File SQL có miền, ngôn ngữ, danh mục và ba POI được công khai. Bản đồ dùng tọa độ POI và nền OpenStreetMap. GPS lấy từ quyền vị trí của trình duyệt.
+- Nếu thiếu bản dịch, hệ thống ưu tiên tiếng Anh hiện có rồi dùng tiếng Việt gốc. Nếu thiếu audio ghi sẵn, trang báo trạng thái và có thể đọc bằng giọng trình duyệt khi hỗ trợ ngôn ngữ. Audio của Backend có thể đặt trong `backend/app/static/audio` và lưu URL `/static/audio/<tệp>` trong bản dịch hoặc dùng URL HTTP(S) hợp lệ.
+- File SQL chưa có tài khoản quản trị hoặc mã QR. Khi cần, tạo tài khoản đầu tiên bằng `.\.venv\Scripts\python.exe -m scripts.init_admin` từ thư mục Backend. Lệnh yêu cầu bạn nhập tài khoản và mật khẩu. Trong quản trị, tạo mã QR và chọn POI. URL QR có dạng `/?qr=<mã>`.
+- Trang quản trị tiếp tục quản lý tài khoản, POI, bản dịch, QR và thống kê du khách từ schema gốc. Google Translate và Edge TTS chỉ được gọi theo thao tác quản trị. Các phiên đăng nhập Web lưu tạm trong tiến trình khi schema chưa có bảng phiên.
+- Khi cơ sở dữ liệu đã có các bảng Web phụ của bản cũ, các chức năng tương ứng tiếp tục dùng chúng. Chi tiết ở [README Backend](backend/README.md).

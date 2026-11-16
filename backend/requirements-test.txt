@@ -1,2 +1,0 @@
--r requirements.txt
-mongomock-motor==0.0.36

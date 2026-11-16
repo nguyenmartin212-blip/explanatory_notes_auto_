@@ -1,133 +1,183 @@
-"""Persistence for anonymous analytics sessions, events and QR codes."""
+from datetime import datetime, timedelta
 
-from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
-from pymongo import ReturnDocument
-from pymongo.errors import DuplicateKeyError
-
-from app.core.errors import ConflictError, NotFoundError
-
-QR = "qr_codes"
-SESSIONS = "analytics_sessions"
-EVENTS = "analytics_events"
-PUBLIC = {"_id": 0}
+from app.models import POI, QrCode, VisitEvent, VisitorDevice, VisitSession
 
 
-async def ensure_indexes(db):
-    await db[QR].create_index("code", unique=True)
-    await db[QR].create_index("qr_id", unique=True)
-    await db[SESSIONS].create_index("session_id", unique=True)
-    await db[SESSIONS].create_index("last_seen")
-    await db[SESSIONS].create_index("started_at")
-    await db[EVENTS].create_index([("event_type", 1), ("poi_id", 1)])
+# ---------- QR ----------
+def get_qr_by_code(db: Session, code: str):
+    return db.query(QrCode).filter(QrCode.code == code, QrCode.is_active.is_(True)).first()
 
 
-async def start_session(db, device_id, lang_code, device_type, qr):
-    now = datetime.now(timezone.utc)
-    session = {
-        "session_id": uuid4().hex,
-        "device_id": device_id,
-        "lang_code": lang_code,
-        "device_type": device_type,
-        "started_at": now,
-        "last_seen": now,
-        "qr_id": qr["qr_id"] if qr else None,
-        "qr_label": qr["label"] if qr else None,
-        "poi_id": qr.get("poi_id") if qr else None,
-    }
-    await db[SESSIONS].insert_one(dict(session))
+def get_qr_by_code_any(db: Session, code: str):
+    """Tìm theo mã, KỂ CẢ mã đã tắt (dùng để kiểm tra trùng khi tạo mới)."""
+    return db.query(QrCode).filter(QrCode.code == code).first()
+
+
+def update_qr(db: Session, qr: QrCode, changes: dict):
+    for key, value in changes.items():
+        setattr(qr, key, value)
+    db.commit()
+    db.refresh(qr)
+    return qr
+
+
+def get_qr_by_id(db: Session, qr_id: int):
+    return db.query(QrCode).filter(QrCode.id == qr_id).first()
+
+
+def list_qr(db: Session):
+    return db.query(QrCode).order_by(QrCode.id).all()
+
+
+def create_qr(db: Session, code: str, label: str, poi_id):
+    qr = QrCode(code=code, label=label, poi_id=poi_id)
+    db.add(qr)
+    db.commit()
+    db.refresh(qr)
+    return qr
+
+
+def delete_qr(db: Session, qr: QrCode) -> None:
+    db.delete(qr)
+    db.commit()
+
+
+# ---------- Thiết bị / phiên / sự kiện ----------
+def get_device(db: Session, device_id: str):
+    return db.query(VisitorDevice).filter(VisitorDevice.id == device_id).first()
+
+
+def ensure_device(db: Session, device_id: str, lang_code, device_type: str):
+    device = get_device(db, device_id)
+    if device is None:
+        try:
+            with db.begin_nested():
+                device = VisitorDevice(id=device_id, preferred_lang=lang_code, device_type=device_type)
+                db.add(device)
+                db.flush()
+        except IntegrityError:
+            device = db.get(VisitorDevice, device_id, with_for_update=True)
+            if device is None:
+                raise
+    touch_device(db, device, lang_code, commit=False)
+
+
+def touch_device(db: Session, device: VisitorDevice, lang_code=None, *, commit=True):
+    device.last_seen_at = datetime.now()
+    if lang_code:
+        device.preferred_lang = lang_code
+    if commit:
+        db.commit()
+
+
+def create_session(db: Session, device_id: str, qr_code_id, lang_code):
+    session = VisitSession(device_id=device_id, qr_code_id=qr_code_id, lang_code=lang_code)
+    db.add(session)
+    db.flush()
     return session
 
 
-async def active_qr(db, code):
-    return await db[QR].find_one({"code": code, "is_active": True}, PUBLIC)
+def get_session(db: Session, session_id: int):
+    return db.query(VisitSession).filter(VisitSession.id == session_id).first()
 
 
-async def heartbeat(db, session_id):
-    updated = await db[SESSIONS].update_one(
-        {"session_id": session_id}, {"$max": {"last_seen": datetime.now(timezone.utc)}}
+def touch_session(db: Session, session: VisitSession):
+    session.last_seen_at = datetime.now()
+    db.commit()
+
+
+def add_event(db: Session, session_id: int, event_type: str, poi_id=None, lang_code=None, *, commit=True):
+    db.add(VisitEvent(session_id=session_id, event_type=event_type, poi_id=poi_id, lang_code=lang_code))
+    if commit:
+        db.commit()
+
+
+# ---------- Thống kê ----------
+def count_online(db: Session, window_seconds: int) -> int:
+    """Đếm số THIẾT BỊ (không đếm số tab) có nhịp heartbeat trong N giây gần nhất."""
+    since = datetime.now() - timedelta(seconds=window_seconds)
+    return (
+        db.query(func.count(func.distinct(VisitSession.device_id)))
+        .filter(VisitSession.last_seen_at >= since)
+        .scalar()
+    ) or 0
+
+
+def count_sessions(db: Session) -> int:
+    return db.query(func.count(VisitSession.id)).scalar() or 0
+
+
+def scans_by_day(db: Session, days: int = 7):
+    since = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
+    day = func.date(VisitEvent.created_at)
+    rows = (
+        db.query(day, func.count(VisitEvent.id))
+        .filter(VisitEvent.event_type == "qr_scan", VisitEvent.created_at >= since)
+        .group_by(day)
+        .order_by(day)
+        .all()
     )
-    if not updated.matched_count:
-        raise NotFoundError("Phiên truy cập không tồn tại")
+    return [(str(d), c) for d, c in rows]
 
 
-async def add_event(db, payload):
-    if not await db[SESSIONS].find_one({"session_id": payload["session_id"]}, {"_id": 1}):
-        raise NotFoundError("Phiên truy cập không tồn tại")
-    await db[EVENTS].insert_one({**payload, "created_at": datetime.now(timezone.utc)})
+def count_unique_visitors(db: Session) -> int:
+    """Số khách (thiết bị) khác nhau từ trước đến nay."""
+    return db.query(func.count(func.distinct(VisitSession.device_id))).scalar() or 0
 
 
-async def online_now(db):
-    threshold = datetime.now(timezone.utc) - timedelta(seconds=90)
-    devices = await db[SESSIONS].aggregate([
-        {"$match": {"last_seen": {"$gte": threshold}}},
-        {"$group": {"_id": "$device_id"}},
-        {"$count": "total"},
-    ]).to_list(length=1)
-    return devices[0]["total"] if devices else 0
+def count_qr_scans(db: Session) -> int:
+    return db.query(func.count(VisitEvent.id)).filter(VisitEvent.event_type == "qr_scan").scalar() or 0
 
 
-async def group_counts(collection, match, group, limit=None):
-    pipeline = [
-        {"$match": match},
-        {"$group": {"_id": group, "count": {"$sum": 1}}},
-        {"$sort": {"count": -1, "_id": 1}},
-    ]
-    if limit:
-        pipeline.append({"$limit": limit})
-    return await collection.aggregate(pipeline).to_list(length=limit)
+def visitors_by_day(db: Session, days: int = 7):
+    """Mỗi ngày có bao nhiêu khách (thiết bị) khác nhau."""
+    since = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
+    day = func.date(VisitSession.started_at)
+    rows = (
+        db.query(day, func.count(func.distinct(VisitSession.device_id)))
+        .filter(VisitSession.started_at >= since)
+        .group_by(day)
+        .order_by(day)
+        .all()
+    )
+    return [(str(d), c) for d, c in rows]
 
 
-async def daily_counts(db, first_day, match, unique_devices=False):
-    day = {"$dateToString": {"format": "%Y-%m-%d", "date": "$started_at"}}
-    group = {"date": day, "device": "$device_id"} if unique_devices else day
-    pipeline = [{"$match": {"started_at": {"$gte": first_day}, **match}}]
-    if unique_devices:
-        pipeline.append({"$group": {"_id": group}})
-        group = "$_id.date"
-    pipeline.append({"$group": {"_id": group, "count": {"$sum": 1}}})
-    rows = await db[SESSIONS].aggregate(pipeline).to_list(length=None)
-    counts = {row["_id"]: row["count"] for row in rows}
-    return [
-        {"date": (first_day + timedelta(days=offset)).date().isoformat(),
-         "count": counts.get((first_day + timedelta(days=offset)).date().isoformat(), 0)}
-        for offset in range(7)
-    ]
+def top_pois_by_event(db: Session, event_type: str, limit: int = 5):
+    """Top điểm theo một loại sự kiện: 'view_poi' (lượt xem) hoặc 'play_audio' (lượt nghe)."""
+    cnt = func.count(VisitEvent.id)
+    return (
+        db.query(POI.id, POI.name_vi, cnt)
+        .join(VisitEvent, VisitEvent.poi_id == POI.id)
+        .filter(VisitEvent.event_type == event_type)
+        .group_by(POI.id, POI.name_vi)
+        .order_by(cnt.desc())
+        .limit(limit)
+        .all()
+    )
 
 
-async def distinct_visitors(db):
-    rows = await db[SESSIONS].aggregate([
-        {"$group": {"_id": "$device_id"}},
-        {"$count": "total"},
-    ]).to_list(length=1)
-    return rows[0]["total"] if rows else 0
+def sessions_by_language(db: Session):
+    cnt = func.count(VisitSession.id)
+    return (
+        db.query(VisitSession.lang_code, cnt)
+        .filter(VisitSession.lang_code.isnot(None))
+        .group_by(VisitSession.lang_code)
+        .order_by(cnt.desc())
+        .all()
+    )
 
 
-async def list_qr(db, offset, limit):
-    return await db[QR].find({}, PUBLIC).sort("code", 1).skip(offset).limit(limit).to_list(limit)
-
-
-async def create_qr(db, payload):
-    qr = {"qr_id": uuid4().hex, **payload}
-    try:
-        await db[QR].insert_one(dict(qr))
-    except DuplicateKeyError as exc:
-        raise ConflictError("Mã QR đã tồn tại") from exc
-    return qr
-
-
-async def update_qr(db, qr_id, fields):
-    query = {"qr_id": qr_id}
-    qr = await db[QR].find_one_and_update(
-        query, {"$set": fields}, return_document=ReturnDocument.AFTER, projection=PUBLIC
-    ) if fields else await db[QR].find_one(query, PUBLIC)
-    if not qr:
-        raise NotFoundError("Mã QR không tồn tại")
-    return qr
-
-
-async def delete_qr(db, qr_id):
-    result = await db[QR].delete_one({"qr_id": qr_id})
-    if not result.deleted_count:
-        raise NotFoundError("Mã QR không tồn tại")
+def sessions_by_qr(db: Session):
+    cnt = func.count(VisitSession.id)
+    return (
+        db.query(QrCode.label, cnt)
+        .join(VisitSession, VisitSession.qr_code_id == QrCode.id)
+        .group_by(QrCode.id, QrCode.label)
+        .order_by(cnt.desc())
+        .all()
+    )

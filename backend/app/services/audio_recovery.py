@@ -1,16 +1,15 @@
-"""Step 4a — recover audio tasks interrupted by a restart."""
-
+"""Requeue interrupted audio tasks at startup (adapted from Extra)."""
 import logging
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from starlette.concurrency import run_in_threadpool
 
-from app.stores import audio_task_store
+from app.stores.audio_task_store import AudioTaskStore
 
 logger = logging.getLogger(__name__)
 
 
-async def recover_audio_tasks(db: AsyncIOMotorDatabase) -> int:
-    count = await audio_task_store.requeue_all_running(db)
+async def recover_audio_tasks() -> int:
+    count = await run_in_threadpool(AudioTaskStore.requeue_all_running)
     if count:
-        logger.warning("Recovered %d interrupted audio task(s)", count)
+        logger.warning("Recovered %d interrupted audio tasks", count)
     return count

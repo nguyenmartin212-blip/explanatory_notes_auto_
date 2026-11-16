@@ -8,9 +8,11 @@ import {
   TextInput,
   View,
 } from 'react-native-web';
+import { Brand, Icon, type IconName } from '../design/Heritage';
 import { useBrowserPois } from '@/features/content/web-hooks';
 import { ADMIN_PERMISSION_GROUPS, hasAdminPermission } from '@/features/admin/permissions';
 import { DeviceUsagePanel } from '@/features/admin/DeviceUsagePanel';
+import { AdminPoiPanel, AdminQrPanel, CreateAccountForm, VisitorStats } from '@/features/admin/ContentManagement';
 import { useDeviceHeartbeat } from '@/features/admin/useDeviceHeartbeat';
 import type { Poi } from '@/features/poi/types';
 import {
@@ -18,18 +20,22 @@ import {
   adminLogin,
   adminLogout,
   assignUserRole,
+  deleteAdminAccount,
   getAdminMe,
   getAdminRoles,
   getAdminUsers,
   getVisitorVisits,
+  resetAccountPassword,
+  setAccountActive,
   updateAdminRole,
   type AdminRole,
   type AdminUser,
   type VisitorVisit,
 } from '@/services/adminApi';
 
-type AdminTab = 'overview' | 'users' | 'roles' | 'visitors' | 'devices';
+type AdminTab = 'overview' | 'users' | 'roles' | 'visitors' | 'devices' | 'pois' | 'qr';
 const PAGE_SIZE = 20;
+const tabIcons: Record<AdminTab, IconName> = { overview: 'grid', users: 'users', roles: 'shield', visitors: 'qr', devices: 'chart', pois: 'pin', qr: 'qr' };
 
 function formatDate(value?: string | null) {
   if (!value) return '—';
@@ -40,7 +46,7 @@ function formatDate(value?: string | null) {
 }
 
 function getPoiName(poi: Poi | undefined) {
-  return poi?.name?.vi ?? poi?.id ?? 'Không rõ điểm đến';
+  return poi?.content.name ?? poi?.id ?? 'Không rõ điểm đến';
 }
 
 function responseMessage(error: unknown) {
@@ -60,6 +66,7 @@ export default function AdminDashboardWeb() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [activeTab, setActiveTab] = useState<AdminTab>('overview');
+  const [statsRevision, setStatsRevision] = useState(0);
   const [notice, setNotice] = useState('');
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [usersTotal, setUsersTotal] = useState(0);
@@ -67,6 +74,7 @@ export default function AdminDashboardWeb() {
   const [roles, setRoles] = useState<AdminRole[]>([]);
   const [visits, setVisits] = useState<VisitorVisit[]>([]);
   const [visitsTotal, setVisitsTotal] = useState(0);
+  const [allVisitsTotal, setAllVisitsTotal] = useState(0);
   const [visitsPage, setVisitsPage] = useState(0);
   const [poiSearch, setPoiSearch] = useState('');
   const [selectedPoiId, setSelectedPoiId] = useState('');
@@ -75,6 +83,7 @@ export default function AdminDashboardWeb() {
   const [isLoadingVisits, setIsLoadingVisits] = useState(false);
   const [requestError, setRequestError] = useState('');
   const [changingUserId, setChangingUserId] = useState('');
+  const [passwordResetId, setPasswordResetId] = useState('');
   const [editingRoleName, setEditingRoleName] = useState('');
   const [draftPermissions, setDraftPermissions] = useState<string[]>([]);
   const [draftDescription, setDraftDescription] = useState('');
@@ -85,19 +94,22 @@ export default function AdminDashboardWeb() {
   const canReadUsers = hasAdminPermission(permissions, 'user:read');
   const canUpdateUsers = hasAdminPermission(permissions, 'user:update');
   const canReadRoles = hasAdminPermission(permissions, 'role:read');
-  const canUpdateRoles = hasAdminPermission(permissions, 'role:update');
-  const canReadVisitors = hasAdminPermission(permissions, 'visitor:read');
-  const canReadDeviceUsage = hasAdminPermission(permissions, 'analytics:read');
-  useDeviceHeartbeat(user?.user_id);
+  const canUpdateRoles = user?.features?.roles !== false && hasAdminPermission(permissions, 'role:update');
+  const canReadVisitors = user?.features?.visits !== false && hasAdminPermission(permissions, 'visitor:read');
+  const canReadStats = hasAdminPermission(permissions, 'analytics:read');
+  const canReadDeviceUsage = user?.features?.device_usage !== false && canReadStats;
+  const canManageContent = user?.role === 'admin' || user?.role === 'super_admin';
+  useDeviceHeartbeat(user?.features?.device_usage === false ? undefined : user?.user_id);
 
   const availableTabs = useMemo(() => {
     const tabs: { id: AdminTab; label: string }[] = [{ id: 'overview', label: 'Tổng quan' }];
+    if (canManageContent) tabs.push({ id: 'pois', label: 'Điểm tham quan' }, { id: 'qr', label: 'Mã QR' });
     if (canReadUsers) tabs.push({ id: 'users', label: 'Tài khoản' });
     if (canReadRoles) tabs.push({ id: 'roles', label: 'Vai trò & quyền' });
     if (canReadVisitors) tabs.push({ id: 'visitors', label: 'Lượt khách QR' });
     if (canReadDeviceUsage) tabs.push({ id: 'devices', label: 'Thống kê thiết bị' });
     return tabs;
-  }, [canReadRoles, canReadUsers, canReadVisitors, canReadDeviceUsage]);
+  }, [canManageContent, canReadRoles, canReadUsers, canReadVisitors, canReadDeviceUsage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -153,6 +165,7 @@ export default function AdminDashboardWeb() {
       const result = await getVisitorVisits(PAGE_SIZE, page * PAGE_SIZE, poiId || undefined);
       setVisits(result.items);
       setVisitsTotal(result.total);
+      if (!poiId) setAllVisitsTotal(result.total);
     } catch (error) {
       setRequestError(responseMessage(error));
     } finally {
@@ -167,7 +180,7 @@ export default function AdminDashboardWeb() {
     }
     if (canReadRoles && (activeTab === 'overview' || activeTab === 'roles')) void loadRoles();
     if (canReadVisitors && (activeTab === 'overview' || activeTab === 'visitors')) {
-      void loadVisits(activeTab === 'visitors' ? visitsPage : 0, activeTab === 'visitors' ? selectedPoiId : '');
+      void loadVisits(visitsPage, selectedPoiId);
     }
   }, [
     user,
@@ -208,6 +221,10 @@ export default function AdminDashboardWeb() {
       setUsers([]);
       setRoles([]);
       setVisits([]);
+      setAllVisitsTotal(0);
+      setSelectedPoiId('');
+      setPoiSearch('');
+      setVisitsPage(0);
       setActiveTab('overview');
     }
   };
@@ -302,14 +319,11 @@ export default function AdminDashboardWeb() {
     return (
       <View style={[styles.loginPage, isCompact && styles.loginPageCompact]}>
         <View style={[styles.loginAside, isCompact && styles.loginAsideCompact]}>
-          <Text style={styles.brand}>GO TO HORIZON</Text>
-          <Text style={[styles.loginHeadline, isCompact && styles.loginHeadlineCompact]}>Quản trị minh bạch, vận hành an toàn.</Text>
+          <Brand />
+          <Text style={[styles.loginHeadline, isCompact && styles.loginHeadlineCompact]}>Quản trị Go to Horizon</Text>
           {!isCompact ? <Text style={styles.loginAsideCopy}>
             Quản lý tài khoản, phân quyền truy cập và theo dõi lượt khách tại các điểm tham quan.
           </Text> : null}
-          {!isCompact ? <View style={styles.securityPill}>
-            <Text style={styles.securityPillText}>BẢO VỆ BẰNG PHÂN QUYỀN RBAC</Text>
-          </View> : null}
         </View>
         <View style={[styles.loginFormWrap, isCompact && styles.loginFormWrapCompact]}>
           <View style={styles.loginCard}>
@@ -353,15 +367,48 @@ export default function AdminDashboardWeb() {
     );
   }
 
-  const hasAnyAdminRead = canReadUsers || canReadRoles || canReadVisitors || canReadDeviceUsage;
+  const hasAnyAdminRead = canManageContent || canReadUsers || canReadRoles || canReadVisitors || canReadStats;
+  const changeAccount = async (account: AdminUser, operation: () => Promise<unknown>, message: string) => {
+    setChangingUserId(account.user_id);
+    setRequestError('');
+    setNotice('');
+    try {
+      await operation();
+      setNotice(message);
+      setPasswordResetId('');
+      if (users.length === 1 && usersPage > 0) setUsersPage(0);
+      else await loadUsers(usersPage);
+    } catch (error) {
+      setRequestError(responseMessage(error));
+    } finally {
+      setChangingUserId('');
+    }
+  };
 
   return (
     <View style={styles.appShell}>
-      <View style={[styles.topbar, isCompact && styles.topbarCompact]}>
-        <View>
-          <Text style={styles.brand}>GO TO HORIZON</Text>
-          <Text style={styles.topbarCaption}>TRUNG TÂM QUẢN TRỊ</Text>
+      <View style={[styles.bodyLayout, isCompact && styles.bodyLayoutCompact]}>
+        <View style={[styles.sidebar, isCompact && styles.sidebarCompact]}>
+          <Brand />
+          <Text style={[styles.sidebarLabel, isCompact && styles.sidebarLabelCompact]}>Quản trị</Text>
+          <View style={[styles.navList, isCompact && styles.navListCompact]}>
+            {availableTabs.map((tab) => (
+              <Pressable
+                key={tab.id}
+                accessibilityRole="button"
+                style={[styles.navItem, isCompact && styles.navItemCompact, activeTab === tab.id && styles.navItemActive]}
+                onPress={() => setActiveTab(tab.id)}
+              >
+                <span className="admin-nav-icon"><Icon name={tabIcons[tab.id]} /></span>
+                <Text style={[styles.navItemText, activeTab === tab.id && styles.navItemTextActive]}>{tab.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <a className="admin-back" href="/"><Icon name="back" />Về trang khám phá</a>
         </View>
+        <View style={styles.adminWorkspace}>
+          <View style={[styles.topbar, isCompact && styles.topbarCompact]}>
+            <Text style={styles.topbarCaption}>Quản trị / {availableTabs.find((tab) => tab.id === activeTab)?.label}</Text>
         <View style={[styles.accountBlock, isCompact && styles.accountBlockCompact]}>
           <View style={styles.avatar}><Text style={styles.avatarText}>{user.username.slice(0, 1).toUpperCase()}</Text></View>
           <View style={[styles.accountCopy, isCompact && styles.accountCopyCompact]}>
@@ -374,36 +421,13 @@ export default function AdminDashboardWeb() {
         </View>
       </View>
 
-      <View style={[styles.bodyLayout, isCompact && styles.bodyLayoutCompact]}>
-        <View style={[styles.sidebar, isCompact && styles.sidebarCompact]}>
-          <Text style={[styles.sidebarLabel, isCompact && styles.sidebarLabelCompact]}>KHÔNG GIAN LÀM VIỆC</Text>
-          <View style={[styles.navList, isCompact && styles.navListCompact]}>
-            {availableTabs.map((tab) => (
-              <Pressable
-                key={tab.id}
-                accessibilityRole="button"
-                style={[styles.navItem, isCompact && styles.navItemCompact, activeTab === tab.id && styles.navItemActive]}
-                onPress={() => setActiveTab(tab.id)}
-              >
-                <Text style={[styles.navItemText, activeTab === tab.id && styles.navItemTextActive]}>{tab.label}</Text>
-                {activeTab === tab.id ? <View style={styles.navIndicator} /> : null}
-              </Pressable>
-            ))}
-          </View>
-          {!isCompact ? <View style={styles.sidebarBottom}>
-            <Text style={styles.permissionLabel}>QUYỀN CỦA BẠN</Text>
-            <Text style={styles.sidebarPermissionCount}>{permissions.includes('*') ? 'Toàn quyền' : `${permissions.length} quyền được cấp`}</Text>
-            <Text style={styles.sidebarHint}>Các thao tác được API xác thực lại theo vai trò của tài khoản.</Text>
-          </View> : null}
-        </View>
-
         <ScrollView style={styles.mainScroll} contentContainerStyle={[styles.mainContent, isCompact && styles.mainContentCompact]}>
           <View style={[styles.pageHeader, isCompact && styles.pageHeaderCompact]}>
             <View>
-              <Text style={styles.eyebrow}>BẢNG ĐIỀU KHIỂN</Text>
-              <Text style={styles.pageTitle}>{availableTabs.find((tab) => tab.id === activeTab)?.label ?? 'Quản trị'}</Text>
+              <Text style={styles.pageTitle}>{activeTab === 'overview' ? 'Tổng quan hoạt động' : availableTabs.find((tab) => tab.id === activeTab)?.label}</Text>
+              {activeTab === 'overview' && <Text style={styles.sectionSubtitle}>Theo dõi lượt tham quan QR, tài khoản và thiết bị đăng nhập.</Text>}
             </View>
-            {activeTab !== 'devices' && <Pressable
+            {activeTab !== 'devices' && activeTab !== 'pois' && activeTab !== 'qr' && <Pressable
               accessibilityRole="button"
               style={styles.refreshButton}
               onPress={() => {
@@ -411,9 +435,10 @@ export default function AdminDashboardWeb() {
                 if (activeTab === 'roles') void loadRoles();
                 if (activeTab === 'visitors') void loadVisits(visitsPage, selectedPoiId);
                 if (activeTab === 'overview') {
+                  setStatsRevision((revision) => revision + 1);
                   if (canReadUsers) void loadUsers(0);
                   if (canReadRoles) void loadRoles();
-                  if (canReadVisitors) void loadVisits(0, '');
+                  if (canReadVisitors) void loadVisits(visitsPage, selectedPoiId);
                 }
               }}
             >
@@ -442,38 +467,23 @@ export default function AdminDashboardWeb() {
 
           {activeTab === 'overview' && hasAnyAdminRead ? (
             <View>
-              <View style={styles.welcomeCard}>
-                <View style={styles.welcomeCopy}>
-                  <Text style={styles.welcomeKicker}>XIN CHÀO, {user.username.toUpperCase()}</Text>
-                  <Text style={styles.welcomeTitle}>Tổng quan hệ thống</Text>
-                  <Text style={styles.welcomeDescription}>Theo dõi quyền truy cập và hoạt động tham quan QR trong một nơi.</Text>
-                </View>
-                <Text style={styles.welcomeSymbol}>✦</Text>
-              </View>
+              {canReadStats && <VisitorStats revision={statsRevision} />}
               <View style={[styles.metricGrid, isCompact && styles.metricGridCompact]}>
-                {canReadVisitors ? (
-                  <MetricCard label="Lượt khách QR" value={visitsTotal} detail="Tổng lượt được phép tra cứu" accent="green" />
-                ) : null}
                 {canReadUsers ? (
                   <MetricCard label="Tài khoản" value={usersTotal} detail="Tài khoản trong hệ thống" accent="blue" />
                 ) : null}
                 {canReadRoles ? (
                   <MetricCard label="Vai trò" value={roles.length} detail="Vai trò đã cấu hình" accent="amber" />
                 ) : null}
+                {canReadVisitors ? (
+                  <MetricCard label="Lượt khách QR" value={allVisitsTotal} detail="Tổng lượt được phép tra cứu" accent="green" />
+                ) : null}
               </View>
-              <View style={styles.sectionHeading}>
-                <Text style={styles.sectionTitle}>Quyền đang có</Text>
-                <Text style={styles.sectionSubtitle}>Trạng thái quyền hiện tại từ máy chủ</Text>
-              </View>
-              <View style={styles.card}>
-                <View style={styles.permissionChipWrap}>
-                  {permissions.includes('*')
-                    ? <PermissionChip label="Toàn quyền quản trị" />
-                    : permissions.map((permission) => <PermissionChip key={permission} label={permission} />)}
-                </View>
-              </View>
+              {canReadDeviceUsage && <View style={styles.card}><DeviceUsagePanel compact /></View>}
             </View>
           ) : null}
+          {activeTab === 'pois' && canManageContent && <AdminPoiPanel audioQueue={user.features?.audio_queue !== false} />}
+          {activeTab === 'qr' && canManageContent && <AdminQrPanel />}
 
           {activeTab === 'users' && canReadUsers ? (
             <View style={styles.card}>
@@ -482,7 +492,6 @@ export default function AdminDashboardWeb() {
                   <Text style={styles.sectionTitle}>Tài khoản hệ thống</Text>
                   <Text style={styles.sectionSubtitle}>{usersTotal} tài khoản · phân trang {PAGE_SIZE} mục</Text>
                 </View>
-                <Text style={styles.readOnlyTag}>QUẢN LÝ VAI TRÒ</Text>
               </View>
               {isLoadingUsers ? <LoadingLine /> : users.length === 0 ? <EmptyMessage text="Chưa có tài khoản trong danh sách." /> : users.map((account) => (
                 <View key={account.user_id} style={[styles.userRow, isCompact && styles.userRowCompact]}>
@@ -501,7 +510,7 @@ export default function AdminDashboardWeb() {
                       </Text>
                     </View>
                     <Text style={styles.roleBadge}>{account.role}</Text>
-                    {canUpdateUsers && canReadRoles ? (
+                    {canUpdateUsers && canReadRoles && account.user_id !== user.user_id ? (
                       <View style={styles.roleOptions}>
                         {roles.filter((role) => role.name !== account.role).map((role) => (
                           <Pressable
@@ -517,6 +526,30 @@ export default function AdminDashboardWeb() {
                         ))}
                       </View>
                     ) : null}
+                    {user.role === 'super_admin' && account.user_id !== user.user_id && (
+                      <div className="admin-workflow-actions">
+                        <button className="heritage-button" disabled={Boolean(changingUserId)} onClick={() => {
+                          const label = account.is_active ? 'Vô hiệu hóa' : 'Bật lại';
+                          if (window.confirm(`${label} tài khoản “${account.username}”?`)) void changeAccount(account,
+                            () => setAccountActive(account.user_id, !account.is_active), 'Đã cập nhật trạng thái.');
+                        }}>{account.is_active ? 'Vô hiệu hóa' : 'Bật lại'}</button>
+                        <button className="heritage-button" disabled={Boolean(changingUserId)}
+                          onClick={() => setPasswordResetId(account.user_id === passwordResetId ? '' : account.user_id)}>Đặt lại mật khẩu</button>
+                        <button className="heritage-button" disabled={Boolean(changingUserId)} onClick={() => {
+                          if (window.confirm(`Xóa tài khoản “${account.username}”?`)) void changeAccount(account,
+                            () => deleteAdminAccount(account.user_id), 'Đã xóa tài khoản.');
+                        }}>Xóa tài khoản</button>
+                        {passwordResetId === account.user_id && <form className="admin-workflow" onSubmit={(event) => {
+                          event.preventDefault();
+                          const newPassword = String(new FormData(event.currentTarget).get('password'));
+                          if (window.confirm(`Đặt lại mật khẩu của “${account.username}”?`)) void changeAccount(account,
+                            () => resetAccountPassword(account.user_id, newPassword), 'Đã đặt lại mật khẩu.');
+                        }}>
+                          <label>Mật khẩu mới<input name="password" type="password" autoComplete="new-password" required minLength={8} maxLength={72} /></label>
+                          <button className="heritage-button" disabled={Boolean(changingUserId)}>Lưu mật khẩu mới</button>
+                        </form>}
+                      </div>
+                    )}
                   </View>
                 </View>
               ))}
@@ -530,7 +563,10 @@ export default function AdminDashboardWeb() {
                   }}
                 />
               ) : null}
-              <Text style={styles.footnote}>API hiện có hỗ trợ xem tài khoản và gán vai trò; không hỗ trợ tạo hoặc xóa tài khoản.</Text>
+              {user.role === 'super_admin' && <CreateAccountForm changed={() => {
+                if (usersPage === 0) void loadUsers(0);
+                else setUsersPage(0);
+              }} />}
             </View>
           ) : null}
 
@@ -621,7 +657,7 @@ export default function AdminDashboardWeb() {
 
           {activeTab === 'devices' && canReadDeviceUsage && <DeviceUsagePanel />}
 
-          {activeTab === 'visitors' && canReadVisitors ? (
+          {(activeTab === 'overview' || activeTab === 'visitors') && canReadVisitors ? (
             <View style={styles.card}>
               <View style={styles.sectionHeadingInline}>
                 <View>
@@ -729,13 +765,8 @@ export default function AdminDashboardWeb() {
             </View>
           ) : null}
 
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>Fonend Admin · Quyền được kiểm tra ở cả giao diện và máy chủ</Text>
-            <Pressable onPress={() => { window.location.assign('/'); }}>
-              <Text style={styles.backToApp}>Về trang khám phá</Text>
-            </Pressable>
-          </View>
         </ScrollView>
+        </View>
       </View>
     </View>
   );
@@ -754,8 +785,7 @@ function MetricCard({
 }) {
   return (
     <View style={styles.metricCard}>
-      <View style={[styles.metricAccent, accent === 'blue' ? styles.metricAccentBlue : accent === 'amber' ? styles.metricAccentAmber : null]} />
-      <Text style={styles.metricLabel}>{label}</Text>
+      <View style={styles.metricHeader}><Text style={styles.metricLabel}>{label}</Text><span className="admin-metric-icon"><Icon name={accent === 'blue' ? 'users' : accent === 'amber' ? 'shield' : 'qr'} /></span></View>
       <Text style={styles.metricValue}>{value.toLocaleString('vi-VN')}</Text>
       <Text style={styles.metricDetail}>{detail}</Text>
     </View>
@@ -816,47 +846,44 @@ function Pagination({
 }
 
 const palette = {
-  green: '#217252',
-  deep: '#173C2D',
-  text: '#24382F',
-  muted: '#718078',
-  border: '#E2EAE5',
-  background: '#F5F8F6',
-  white: '#FFFFFF',
+  green: '#20372c',
+  deep: '#20372c',
+  text: '#202a23',
+  muted: '#546057',
+  border: '#dedbd0',
+  background: '#f7f4ec',
+  white: '#fffcf6',
 };
 
 const styles = StyleSheet.create({
   loadingPage: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.background, gap: 14 },
   loginPage: { flex: 1, minHeight: 600, flexDirection: 'row', backgroundColor: palette.white },
   loginPageCompact: { flexDirection: 'column' },
-  loginAside: { flex: 1, minWidth: 280, justifyContent: 'center', paddingHorizontal: 56, backgroundColor: palette.deep },
+  loginAside: { color: '#ffffff', flex: 1, minWidth: 280, justifyContent: 'center', paddingHorizontal: 56, backgroundColor: palette.deep },
   loginAsideCompact: { flex: 0, minWidth: 0, paddingHorizontal: 22, paddingVertical: 18 },
-  brand: { color: '#2B8A62', fontSize: 13, fontWeight: '900', letterSpacing: 2 },
-  loginHeadline: { maxWidth: 500, color: '#FFFFFF', fontSize: 42, lineHeight: 51, fontWeight: '800', marginTop: 26 },
+  loginHeadline: { fontFamily: 'var(--serif)', maxWidth: 500, color: '#fffcf6', fontSize: 42, lineHeight: 51, fontWeight: '800', marginTop: 26 },
   loginHeadlineCompact: { fontSize: 21, lineHeight: 27, marginTop: 10 },
   loginAsideCopy: { maxWidth: 430, color: '#C2D6CB', fontSize: 16, lineHeight: 26, marginTop: 16 },
-  securityPill: { alignSelf: 'flex-start', marginTop: 32, borderWidth: 1, borderColor: '#507D66', borderRadius: 30, paddingHorizontal: 14, paddingVertical: 9 },
-  securityPillText: { color: '#D3E9DB', fontSize: 10, fontWeight: '800', letterSpacing: 1 },
-  loginFormWrap: { flex: 1, minWidth: 360, alignItems: 'center', justifyContent: 'center', padding: 28, backgroundColor: '#F8FAF8' },
+  loginFormWrap: { flex: 1, minWidth: 360, alignItems: 'center', justifyContent: 'center', padding: 28, backgroundColor: '#f7f4ec' },
   loginFormWrapCompact: { flex: 1, minWidth: 0, justifyContent: 'flex-start', padding: 16 },
   loginCard: { width: '100%', maxWidth: 430, backgroundColor: palette.white, borderWidth: 1, borderColor: palette.border, borderRadius: 22, padding: 34, shadowColor: '#193B2C', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.06, shadowRadius: 24, elevation: 3 },
   eyebrow: { color: '#32835F', fontSize: 10, fontWeight: '900', letterSpacing: 1.5 },
   loginTitle: { color: palette.deep, fontSize: 30, fontWeight: '800', marginTop: 10 },
   mutedText: { color: palette.muted, fontSize: 13, lineHeight: 20 },
   fieldLabel: { color: palette.text, fontSize: 12, fontWeight: '800', marginTop: 19, marginBottom: 8 },
-  input: { borderWidth: 1, borderColor: '#DCE6DF', borderRadius: 11, backgroundColor: '#FFFFFF', color: palette.text, minHeight: 46, paddingHorizontal: 13, paddingVertical: 11, fontSize: 14 },
+  input: { borderWidth: 1, borderColor: '#dedbd0', borderRadius: 11, backgroundColor: '#fffcf6', color: palette.text, minHeight: 46, paddingHorizontal: 13, paddingVertical: 11, fontSize: 14 },
   errorText: { color: '#B42318', fontSize: 12, marginTop: 12 },
   primaryButton: { minHeight: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.green, borderRadius: 11, paddingHorizontal: 18, paddingVertical: 13, marginTop: 20 },
-  primaryButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+  primaryButtonText: { color: '#fffcf6', fontSize: 13, fontWeight: '800' },
   disabledButton: { opacity: 0.5 },
   loginFootnote: { color: '#89968E', fontSize: 11, lineHeight: 17, textAlign: 'center', marginTop: 18 },
-  appShell: { flex: 1, minHeight: 650, backgroundColor: palette.background },
+  appShell: { flex: 1, minWidth: 0, backgroundColor: palette.background },
   topbar: { minHeight: 76, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 30, backgroundColor: palette.white, borderBottomWidth: 1, borderBottomColor: palette.border },
   topbarCompact: { paddingHorizontal: 14 },
-  topbarCaption: { color: '#86948B', fontSize: 9, fontWeight: '800', letterSpacing: 1.4, marginTop: 4 },
+  topbarCaption: { color: palette.text, fontSize: 13, fontWeight: '700' },
   accountBlock: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   accountBlockCompact: { gap: 6 },
-  avatar: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 19, backgroundColor: '#E6F2EB' },
+  avatar: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 19, backgroundColor: '#e4eadf' },
   avatarText: { color: palette.green, fontSize: 15, fontWeight: '900' },
   accountCopy: { minWidth: 100 },
   accountCopyCompact: { minWidth: 0 },
@@ -866,61 +893,48 @@ const styles = StyleSheet.create({
   logoutButtonCompact: { paddingHorizontal: 8, marginLeft: 2 },
   logoutText: { color: '#51645A', fontSize: 11, fontWeight: '700' },
   bodyLayout: { flex: 1, flexDirection: 'row' },
-  bodyLayoutCompact: { flexDirection: 'column' },
-  sidebar: { width: 235, paddingHorizontal: 15, paddingTop: 28, backgroundColor: '#FFFFFF', borderRightWidth: 1, borderRightColor: palette.border },
+  bodyLayoutCompact: { flexDirection: 'column', overflowY: 'auto' },
+  sidebar: { width: 233, paddingHorizontal: 16, paddingVertical: 23, backgroundColor: '#1e332a', color: '#edf0e8' },
   sidebarCompact: { width: '100%', paddingHorizontal: 10, paddingTop: 10, paddingBottom: 6, borderRightWidth: 0, borderBottomWidth: 1, borderBottomColor: palette.border },
-  navList: { flex: 1 },
+  navList: { flexGrow: 1 },
   navListCompact: { flexDirection: 'row', flexWrap: 'wrap', gap: 3 },
-  sidebarLabel: { color: '#94A097', fontSize: 9, fontWeight: '900', letterSpacing: 1.2, marginHorizontal: 12, marginBottom: 15 },
-  sidebarLabelCompact: { marginBottom: 7 },
-  navItem: { minHeight: 45, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, borderRadius: 10, marginBottom: 5 },
-  navItemCompact: { minHeight: 34, paddingHorizontal: 8, marginBottom: 0 },
-  navItemActive: { backgroundColor: '#EAF4EE' },
-  navItemText: { color: '#63736A', fontSize: 12, fontWeight: '700' },
-  navItemTextActive: { color: palette.green },
-  navIndicator: { width: 6, height: 6, borderRadius: 3, backgroundColor: palette.green },
-  sidebarBottom: { marginTop: 'auto', paddingHorizontal: 12, paddingVertical: 20, borderTopWidth: 1, borderTopColor: '#EDF1EE' },
-  permissionLabel: { color: '#91A097', fontSize: 9, fontWeight: '900', letterSpacing: 1 },
-  sidebarPermissionCount: { color: palette.deep, fontSize: 12, fontWeight: '800', marginTop: 8 },
-  sidebarHint: { color: palette.muted, fontSize: 10, lineHeight: 16, marginTop: 6 },
+  sidebarLabel: { color: '#bbcabc', fontSize: 11, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase', marginHorizontal: 9, marginTop: 28, marginBottom: 9 },
+  sidebarLabelCompact: { marginTop: 12, marginBottom: 7 },
+  navItem: { minHeight: 45, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, borderRadius: 8, marginBottom: 5 },
+  navItemCompact: { minHeight: 44, paddingHorizontal: 8, marginBottom: 0 },
+  navItemActive: { backgroundColor: '#3a5144' },
+  navItemText: { color: '#edf0e8', fontSize: 12, fontWeight: '700' },
+  navItemTextActive: { color: '#ffffff' },
+  adminWorkspace: { flex: 1, minWidth: 0, minHeight: 0 },
   mainScroll: { flex: 1 },
   mainContent: { width: '100%', maxWidth: 1480, alignSelf: 'center', padding: 30 },
   mainContentCompact: { padding: 14 },
-  pageHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 },
+  pageHeader: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 },
   pageHeaderCompact: { marginBottom: 15 },
-  pageTitle: { color: palette.deep, fontSize: 28, fontWeight: '800', marginTop: 5 },
-  refreshButton: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: palette.border, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10 },
+  pageTitle: { color: palette.text, fontFamily: 'var(--serif)', fontSize: 36, fontWeight: '600', marginTop: 5 },
+  refreshButton: { backgroundColor: '#fffcf6', borderWidth: 1, borderColor: palette.border, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10 },
   refreshButtonText: { color: '#52645A', fontSize: 11, fontWeight: '800' },
   noticeBanner: { backgroundColor: '#E9F5ED', borderRadius: 9, padding: 12, marginBottom: 14 },
   noticeText: { color: '#276344', fontSize: 12, fontWeight: '700' },
   errorBanner: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFF0EF', borderWidth: 1, borderColor: '#F3CFCC', borderRadius: 9, padding: 12, marginBottom: 14 },
   errorBannerText: { flex: 1, color: '#9B2C24', fontSize: 12 },
   dismissText: { color: '#9B2C24', fontSize: 11, fontWeight: '800', marginLeft: 14 },
-  welcomeCard: { minHeight: 176, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', overflow: 'hidden', borderRadius: 19, padding: 28, backgroundColor: '#1E6848' },
-  welcomeCopy: { flex: 1 },
-  welcomeKicker: { color: '#B9DDC7', fontSize: 10, fontWeight: '900', letterSpacing: 1.4 },
-  welcomeTitle: { color: '#FFFFFF', fontSize: 26, fontWeight: '800', marginTop: 10 },
-  welcomeDescription: { maxWidth: 600, color: '#D7EADF', fontSize: 13, lineHeight: 20, marginTop: 8 },
-  welcomeSymbol: { color: '#72B88C', fontSize: 74, fontWeight: '300', marginHorizontal: 25 },
-  metricGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 18 },
+  metricHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  metricGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginBottom: 16 },
   metricGridCompact: { gap: 8 },
-  metricCard: { flexGrow: 1, flexBasis: 210, minHeight: 126, overflow: 'hidden', borderWidth: 1, borderColor: palette.border, borderRadius: 15, backgroundColor: '#FFFFFF', padding: 18 },
-  metricAccent: { position: 'absolute', top: 0, left: 0, width: 4, height: '100%', backgroundColor: '#398961' },
-  metricAccentBlue: { backgroundColor: '#3E78AA' },
-  metricAccentAmber: { backgroundColor: '#D29B38' },
-  metricLabel: { color: palette.muted, fontSize: 11, fontWeight: '700' },
+  metricCard: { flexGrow: 1, flexBasis: 165, minHeight: 104, overflow: 'hidden', borderWidth: 1, borderColor: palette.border, borderRadius: 15, backgroundColor: '#fffcf6', padding: 18 },
+  metricLabel: { color: palette.text, fontSize: 13, fontWeight: '700' },
   metricValue: { color: palette.deep, fontSize: 28, fontWeight: '900', marginTop: 10 },
-  metricDetail: { color: '#89968E', fontSize: 10, marginTop: 3 },
+  metricDetail: { color: palette.muted, fontSize: 11, marginTop: 3 },
   sectionHeading: { marginBottom: 13 },
   sectionHeadingInline: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
   sectionTitle: { color: palette.deep, fontSize: 17, fontWeight: '800' },
   sectionSubtitle: { color: palette.muted, fontSize: 11, marginTop: 5 },
-  card: { borderWidth: 1, borderColor: palette.border, borderRadius: 15, backgroundColor: '#FFFFFF', padding: 20, marginBottom: 16 },
-  permissionChipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  card: { borderWidth: 1, borderColor: palette.border, borderRadius: 15, backgroundColor: '#fffcf6', padding: 20, marginBottom: 16 },
   permissionChip: { backgroundColor: '#F0F5F1', borderRadius: 30, paddingHorizontal: 10, paddingVertical: 7 },
   permissionChipText: { color: '#456354', fontSize: 10, fontWeight: '700' },
   readOnlyTag: { color: '#58816A', backgroundColor: '#EDF5EF', fontSize: 9, fontWeight: '900', letterSpacing: 0.8, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 7 },
-  userRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 20, borderTopWidth: 1, borderTopColor: '#EDF1EE', paddingVertical: 16 },
+  userRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 20, borderTopWidth: 1, borderTopColor: '#e8e4d9', paddingVertical: 16 },
   userRowCompact: { flexDirection: 'column', alignItems: 'stretch', gap: 12 },
   userIdentity: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, minWidth: 200 },
   userAvatar: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: '#EEF3EF', borderRadius: 20 },
@@ -933,55 +947,55 @@ const styles = StyleSheet.create({
   statusBadge: { alignSelf: 'flex-start', borderRadius: 20, paddingHorizontal: 9, paddingVertical: 5 },
   statusActive: { backgroundColor: '#E8F4EB' },
   statusInactive: { backgroundColor: '#FDEDEC' },
-  statusInside: { backgroundColor: '#FFF5E3' },
-  statusText: { fontSize: 9, fontWeight: '800' },
+  statusInside: { backgroundColor: '#e4eadf' },
+  statusText: { fontSize: 11, fontWeight: '800' },
   statusActiveText: { color: '#2C7049' },
   statusInactiveText: { color: '#A83C36' },
-  statusInsideText: { color: '#956A1F' },
+  statusInsideText: { color: '#324a36' },
   roleBadge: { color: '#455B4E', fontSize: 11, fontWeight: '800', backgroundColor: '#F2F5F2', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   roleOptions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 5, maxWidth: 350 },
-  roleOption: { paddingHorizontal: 8, paddingVertical: 5, borderRadius: 7, backgroundColor: '#F4F7F5' },
+  roleOption: { paddingHorizontal: 8, paddingVertical: 5, borderRadius: 7, backgroundColor: '#f2eee4' },
   roleOptionText: { color: '#537060', fontSize: 9, fontWeight: '700' },
   footnote: { color: '#849188', fontSize: 10, lineHeight: 16, marginTop: 12 },
   roleLayout: { flexDirection: 'row', alignItems: 'flex-start', gap: 16 },
   roleLayoutCompact: { flexDirection: 'column' },
-  roleListCard: { width: 300, borderWidth: 1, borderColor: palette.border, borderRadius: 15, backgroundColor: '#FFFFFF', padding: 17 },
+  roleListCard: { width: 300, borderWidth: 1, borderColor: palette.border, borderRadius: 15, backgroundColor: '#fffcf6', padding: 17 },
   roleListCardCompact: { width: '100%' },
-  roleListItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: '#EDF1EE', paddingVertical: 13, paddingHorizontal: 8, borderRadius: 8 },
+  roleListItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: '#e8e4d9', paddingVertical: 13, paddingHorizontal: 8, borderRadius: 8 },
   roleListItemSelected: { backgroundColor: '#EFF6F1' },
   roleListCopy: { flex: 1 },
   roleListName: { color: palette.deep, fontSize: 12, fontWeight: '800' },
   roleListDescription: { color: palette.muted, fontSize: 10, lineHeight: 15, marginTop: 4 },
   roleListMeta: { color: '#5E826B', fontSize: 9, fontWeight: '700', marginTop: 6 },
   editMark: { color: palette.green, fontSize: 24, marginLeft: 8 },
-  permissionEditorCard: { flex: 1, minWidth: 300, borderWidth: 1, borderColor: palette.border, borderRadius: 15, backgroundColor: '#FFFFFF', padding: 20 },
+  permissionEditorCard: { flex: 1, minWidth: 300, borderWidth: 1, borderColor: palette.border, borderRadius: 15, backgroundColor: '#fffcf6', padding: 20 },
   permissionList: { maxHeight: 540, marginTop: 14 },
   permissionGroup: { marginBottom: 15 },
   permissionGroupTitle: { color: '#557361', fontSize: 10, fontWeight: '900', letterSpacing: 0.6, marginBottom: 5 },
   permissionOption: { minHeight: 39, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 5 },
   checkbox: { width: 17, height: 17, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#CAD8CE', borderRadius: 4 },
   checkboxSelected: { backgroundColor: palette.green, borderColor: palette.green },
-  checkboxTick: { color: '#FFFFFF', fontSize: 11, fontWeight: '900' },
+  checkboxTick: { color: '#fffcf6', fontSize: 11, fontWeight: '900' },
   permissionOptionCopy: { flex: 1 },
   permissionOptionLabel: { color: palette.text, fontSize: 11, fontWeight: '700' },
   permissionCode: { color: '#94A097', fontSize: 9, marginTop: 2 },
   totalBadge: { color: '#39734F', backgroundColor: '#EAF4ED', fontSize: 11, fontWeight: '900', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 },
   poiSuggestions: { borderWidth: 1, borderColor: palette.border, borderRadius: 10, overflow: 'hidden', marginTop: 6 },
-  poiSuggestion: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#EDF1EE' },
+  poiSuggestion: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#e8e4d9' },
   poiSuggestionName: { color: palette.text, fontSize: 11, fontWeight: '700' },
   poiSuggestionId: { color: palette.muted, fontSize: 10 },
   filterRow: { flexDirection: 'row', gap: 8, marginTop: 12, marginBottom: 14 },
-  filterChip: { borderWidth: 1, borderColor: palette.border, borderRadius: 20, paddingHorizontal: 11, paddingVertical: 7, backgroundColor: '#FFFFFF' },
+  filterChip: { borderWidth: 1, borderColor: palette.border, borderRadius: 20, paddingHorizontal: 11, paddingVertical: 7, backgroundColor: '#fffcf6' },
   filterChipSelected: { borderColor: '#C7DFCF', backgroundColor: '#EDF6EF' },
   filterChipText: { color: '#607268', fontSize: 10, fontWeight: '700' },
   filterChipTextSelected: { color: '#286744', fontSize: 10, fontWeight: '800' },
-  visitorTableHeader: { flexDirection: 'row', paddingVertical: 10, borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#EDF1EE' },
+  visitorTableHeader: { flexDirection: 'row', paddingVertical: 10, borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#e8e4d9' },
   visitorTableHeaderCompact: { display: 'none' },
   tableHeaderText: { color: '#8A978E', fontSize: 9, fontWeight: '900', letterSpacing: 0.6 },
   visitColumn: { flex: 2 },
   timeColumn: { flex: 1.1 },
   statusColumn: { width: 130 },
-  visitRow: { flexDirection: 'row', alignItems: 'center', minHeight: 82, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: '#EDF1EE' },
+  visitRow: { flexDirection: 'row', alignItems: 'center', minHeight: 82, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: '#e8e4d9' },
   visitRowCompact: { flexDirection: 'column', alignItems: 'stretch', gap: 7, paddingVertical: 14 },
   visitIdentity: { flex: 2, paddingRight: 10 },
   visitIdentityCompact: { flex: 0, paddingRight: 0 },
@@ -1001,10 +1015,7 @@ const styles = StyleSheet.create({
   disabledPageButton: { opacity: 0.4 },
   pageButtonText: { color: '#53665B', fontSize: 10, fontWeight: '700' },
   loadingLine: { minHeight: 100, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
-  emptyCard: { borderWidth: 1, borderColor: palette.border, borderRadius: 14, backgroundColor: '#FFFFFF', padding: 24 },
+  emptyCard: { borderWidth: 1, borderColor: palette.border, borderRadius: 14, backgroundColor: '#fffcf6', padding: 24 },
   emptyTitle: { color: palette.deep, fontSize: 16, fontWeight: '800', marginBottom: 8 },
   emptyState: { minHeight: 120, alignItems: 'center', justifyContent: 'center', padding: 20 },
-  footer: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 22, marginTop: 10, borderTopWidth: 1, borderTopColor: '#E6ECE8' },
-  footerText: { color: '#8A978E', fontSize: 10 },
-  backToApp: { color: palette.green, fontSize: 10, fontWeight: '800' },
 });

@@ -1,8 +1,13 @@
 // src/screens/MapScreen.web.tsx
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity, TextInput, Linking } from 'react-native-web';
 import type { Poi } from '../features/poi/types';
-import { useBrowserPois } from '../features/content/web-hooks';
+import { useBrowserPois, useOfflineDownload, useVisitorOptions } from '../features/content/web-hooks';
+import { useVisitorSession } from '../features/content/visitor-session';
+import { useNarration } from '../features/content/useNarration';
+import { getPoiDetail } from '../features/poi/api';
+import { PoiMap } from '../features/poi/PoiMap.web';
+import { parsePoiQr } from '../features/qr/services/qr-content';
 import {
   createGeofenceRuntimeState,
   evaluatePoi,
@@ -13,6 +18,25 @@ import { foregroundGeofenceWeb } from '../features/geofence/services/foreground-
 import type { WebGeofenceLocation } from '../features/geofence/services/foreground-geofence.web';
 import { apiDelete, apiPost } from '../services/apiClient';
 
+
+import { AudioControl, HeritageHeader, Icon, LanguageSelect, PoiPhoto, getUrlLanguage, interfaceLanguage, saveLanguage } from '../design/Heritage';
+
+const playbackText = {
+  vi: { pause: 'Tạm dừng', progress: 'Tiến trình thuyết minh', unavailable: 'Trình duyệt chưa có giọng đọc cho ngôn ngữ này.', failed: 'Không phát được thuyết minh. Hãy thử bấm phát lại.', recording: 'Audio ghi sẵn', speech: 'Giọng đọc trình duyệt', fallback: 'Ngôn ngữ thay thế', auto: 'Tự phát khi đến gần', offline: 'Tải để dùng ngoại tuyến', map: 'Bản đồ điểm tham quan', position: 'Vị trí của bạn', finding: 'Đang tìm vị trí…', checkingQr: 'Đang xác thực mã QR…', qrUnavailable: 'Cần kết nối để xác thực mã QR.', qrAccepted: 'Mã QR hợp lệ.' },
+  en: { pause: 'Pause', progress: 'Narration progress', unavailable: 'This browser has no voice for this language.', failed: 'Playback failed. Press play to try again.', recording: 'Recorded audio', speech: 'Browser narration', fallback: 'Fallback language', auto: 'Play automatically on arrival', offline: 'Download for offline use', map: 'Destination map', position: 'Your location', finding: 'Finding your location…', checkingQr: 'Checking QR code…', qrUnavailable: 'A connection is required to check this QR code.', qrAccepted: 'QR code accepted.' },
+  zh: { pause: '暂停', progress: '讲解进度', unavailable: '浏览器没有此语言的朗读语音。', failed: '播放失败，请点击播放重试。', recording: '录制音频', speech: '浏览器朗读', fallback: '备用语言', auto: '到达附近时自动播放', offline: '下载以便离线使用', map: '景点地图', position: '您的位置', finding: '正在定位…', checkingQr: '正在验证二维码…', qrUnavailable: '联网后才能验证二维码。', qrAccepted: '二维码有效。' },
+};
+
+const explorerText = {
+  vi: { explore: 'Khám phá', title: 'Nghe chuyện', subtitle: 'từ mỗi miền.', kicker: 'Thuyết minh di sản Việt Nam', intro: 'Chọn điểm đến, nghe thuyết minh bằng ngôn ngữ của bạn và lưu những nơi muốn ghé.', places: 'Khám phá điểm đến', help: 'Tìm địa điểm theo vùng hoặc bật GPS để xem điểm gần bạn.', all: 'Tất cả', qr: 'Quét QR', admin: 'Quản trị', details: 'Xem địa điểm', loading: 'Đang tải điểm đến…', inside: 'Đang tham quan', transcript: 'Nội dung thuyết minh' },
+  en: { explore: 'Explore', title: 'Hear the stories', subtitle: 'of every region.', kicker: 'Vietnam heritage audio guide', intro: 'Choose a destination, listen in your language and save the places you want to visit.', places: 'Explore destinations', help: 'Browse by region or turn on GPS to see places near you.', all: 'All regions', qr: 'Scan QR', admin: 'Admin', details: 'View destination', loading: 'Loading destinations…', inside: 'Visit in progress', transcript: 'Audio transcript' },
+  zh: { explore: '探索', title: '聆听故事', subtitle: '走遍各地。', kicker: '越南文化遗产语音导览', intro: '选择目的地，用您的语言收听导览，并保存想去的景点。', places: '探索目的地', help: '按地区浏览，或开启 GPS 查找附近景点。', all: '全部地区', qr: '扫描二维码', admin: '管理', details: '查看景点', loading: '正在加载景点…', inside: '参观中', transcript: '讲解文字' },
+};
+const mediaText = {
+  vi: { noAudio: 'Chưa có audio ghi sẵn', noTiles: 'Không tải được nền OpenStreetMap. Các điểm tham quan vẫn có thể chọn.', noPois: 'Hiện chưa có điểm tham quan được công khai.', qrPoiHidden: 'Mã QR hợp lệ. Điểm liên kết hiện chưa công khai.' },
+  en: { noAudio: 'No recorded audio available', noTiles: 'The OpenStreetMap background is unavailable. You can still select destinations.', noPois: 'No destinations are currently published.', qrPoiHidden: 'QR code accepted. The linked destination is unavailable.' },
+  zh: { noAudio: '暂无录制音频', noTiles: '无法加载 OpenStreetMap 底图。仍可选择景点。', noPois: '暂无已公开景点。', qrPoiHidden: '二维码有效。关联景点暂未公开。' },
+};
 type LanguageKey = 'vi' | 'en' | 'zh';
 type VietnamRegion = 'north' | 'central' | 'south';
 type VisitorStatus = 'idle' | 'loading' | 'inside' | 'exited' | 'deleted' | 'error';
@@ -52,10 +76,9 @@ function formatDistance(meters: number) {
   return meters < 1_000 ? `${Math.round(meters)} m` : `${(meters / 1_000).toFixed(1)} km`;
 }
 
-function getVietnamRegion(latitude: number): VietnamRegion {
-  if (latitude >= 18) return 'north';
-  if (latitude <= 13.5) return 'south';
-  return 'central';
+function getVietnamRegion(poi: Poi): VietnamRegion | undefined {
+  const code = poi.regionCode;
+  return code === 'north' || code === 'central' || code === 'south' ? code : undefined;
 }
 
 // Từ điển đa ngôn ngữ hoàn chỉnh cho toàn bộ giao diện
@@ -69,8 +92,8 @@ const uiText = {
     priorityBadge: 'Ưu tiên',
     metersUnit: 'mét',
     ttsTitle: '🗣️ Kịch bản Thuyết minh',
-    listen: '🔊 Nghe âm thanh',
-    stop: '⏹️ Dừng đọc',
+    listen: 'Nghe thuyết minh',
+    stop: 'Dừng đọc',
     openMap: '🌐 Mở trên Google Maps',
     selectPrompt: '📍 Vui lòng chọn một địa điểm ở danh sách bên trái',
     qrTitle: '📲 Quét QR để ghi nhận lượt tham quan',
@@ -78,7 +101,7 @@ const uiText = {
     visitorTitle: 'Ghi nhận lượt tham quan',
     visitorCheckIn: 'Đang ghi nhận lượt vào...',
     visitorCheckInFailed: 'Không thể ghi nhận lượt vào.',
-    visitorExit: 'Rời điểm tham quan',
+    visitorExit: 'Kết thúc tham quan',
     visitorExitProgress: 'Đang ghi nhận lượt ra...',
     visitorExitSuccess: 'Đã ghi nhận thời gian rời điểm tham quan.',
     visitorRetry: 'Thử lại',
@@ -153,8 +176,8 @@ const uiText = {
     priorityBadge: 'Priority',
     metersUnit: 'meters',
     ttsTitle: '🗣️ Narration Script',
-    listen: '🔊 Listen Audio',
-    stop: '⏹️ Stop',
+    listen: 'Listen to the audio guide',
+    stop: 'Stop narration',
     openMap: '🌐 Open on Google Maps',
     selectPrompt: '📍 Please select a location from the left list',
     qrTitle: '📲 Scan to record your visit',
@@ -237,8 +260,8 @@ const uiText = {
     priorityBadge: '优先级别',
     metersUnit: '米',
     ttsTitle: '🗣️ 语音讲解脚本',
-    listen: '🔊 听语音',
-    stop: '⏹️ 停止',
+    listen: '收听语音导览',
+    stop: '停止播放',
     openMap: '🌐 在谷歌地图中打开',
     selectPrompt: '📍 请从左侧列表中选择一个地点',
     qrTitle: '📲 扫码记录参观',
@@ -314,18 +337,40 @@ const uiText = {
   },
 };
 
-export default function MapScreenWeb() {
-  const { pois, isLoading: isContentLoading } = useBrowserPois();
+export default function MapScreenWeb({ onQrResult }: { onQrResult?: (valid: boolean | null) => void } = {}) {
+  const [currentLang, setCurrentLang] = useState(getUrlLanguage);
+  const { pois, isLoading: isContentLoading, error: catalogError } = useBrowserPois(currentLang);
+  const { languages, regions, optionsError } = useVisitorOptions();
+  const offline = useOfflineDownload(currentLang);
+  const uiLang = interfaceLanguage(currentLang);
+  const audioText = playbackText[uiLang];
+  const media = mediaText[uiLang];
+  const qrCode = new URLSearchParams(window.location.search).get('qr');
+  const { session, sessionError, track } = useVisitorSession(qrCode, currentLang);
+  useEffect(() => {
+    if (qrCode === null) return;
+    if (sessionError) onQrResult?.(null); // không xác thực được (mất mạng / lỗi máy chủ)
+    else if (session && session.qr_valid !== null) onQrResult?.(session.qr_valid);
+  }, [qrCode, session, sessionError, onQrResult]);
+  const { play, stop: handleStopSpeech, playback, seek, error: playbackError } = useNarration(currentLang, Boolean(catalogError), track, audioText);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedPoi, setSelectedPoi] = useState<Poi | null>(null);
-  const [currentLang, setCurrentLang] = useState<LanguageKey>('vi');
-  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [catalogRegion, setCatalogRegion] = useState<VietnamRegion | 'all'>('all');
+  const detailsRef = useRef<HTMLDialogElement>(null);
+  const routeDialogRef = useRef<HTMLDialogElement>(null);
+  const [selectedPoiDraft, setSelectedPoi] = useState<Poi | null>(null);
+  const [detail, setDetail] = useState<{ poi: Poi; lang: string } | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailError, setDetailError] = useState('');
+  const selectedPoi = detail?.lang === currentLang && detail.poi.id === selectedPoiDraft?.id && detailOpen
+    ? detail.poi : pois.find((poi) => poi.id === selectedPoiDraft?.id) ?? null;
+  const openedLink = useRef<string | null>(null);
   const [isLocationTracking, setIsLocationTracking] = useState(false);
+  const [autoplay, setAutoplay] = useState(false);
   const [location, setLocation] = useState<WebGeofenceLocation | null>(null);
   const [locationError, setLocationError] = useState('');
   const [geofenceArrivalPoiId, setGeofenceArrivalPoiId] = useState<string | null>(null);
   const geofenceState = useRef(createGeofenceRuntimeState());
-  const announceRef = useRef<(text?: string) => void>(() => undefined);
+  const lastVisitedPoi = useRef<string | null>(null);
   const [visitorStatus, setVisitorStatus] = useState<VisitorStatus>('idle');
   const [visitorVisitId, setVisitorVisitId] = useState<string | null>(null);
   const [visitorEnteredAt, setVisitorEnteredAt] = useState<string | null>(null);
@@ -344,15 +389,29 @@ export default function MapScreenWeb() {
   const [isClearingRoute, setIsClearingRoute] = useState(false);
   const [isDeletingVisit, setIsDeletingVisit] = useState(false);
 
-  const visitorParams = typeof window === 'undefined'
-    ? null
-    : new URLSearchParams(window.location.search);
-  const visitorMode = visitorParams?.get('visit') === '1';
-  const visitorPoiId = visitorParams?.get('poi') ?? null;
+  const visitorParams = useMemo(() => new URLSearchParams(window.location.search), []);
+  const pathPoiId = window.location.pathname.startsWith('/poi/') ? parsePoiQr(window.location.href)?.poiId : null;
+  const managedPoi = session?.qr_valid && session.poi_id !== null
+    ? pois.find((poi) => poi.backendId === session.poi_id) : undefined;
+  const rawPoiId = qrCode === null ? visitorParams?.get('poi') ?? visitorParams?.get('story') ?? pathPoiId : null;
+  const visitorPoiId = rawPoiId && /^\d+$/.test(rawPoiId) ? `poi-${rawPoiId}` : rawPoiId ?? null;
+  const visitorMode = Boolean(session?.web_visits && visitorParams?.get('visit') === '1' && qrCode === null);
   const visitorPoi = pois.find(poi => poi.id === visitorPoiId) ?? null;
   const geofenceArrivalPoi = pois.find((poi) => poi.id === geofenceArrivalPoiId) ?? null;
 
-  const t = uiText[currentLang];
+  const t = uiText[uiLang];
+  useEffect(() => {
+    if (visitorMode && visitorPoi && lastVisitedPoi.current !== visitorPoi.id) {
+      lastVisitedPoi.current = visitorPoi.id;
+      track('view_poi', visitorPoi.backendId);
+    }
+  }, [track, visitorMode, visitorPoi]);
+
+  useEffect(() => {
+    const dialog = routeDialogRef.current;
+    if (isRoutePickerOpen && dialog && !dialog.open) dialog.showModal();
+    if (!isRoutePickerOpen && dialog?.open) dialog.close();
+  }, [isRoutePickerOpen]);
 
   // Dừng âm thanh khi chuyển trang hoặc unmount
   useEffect(() => {
@@ -384,6 +443,7 @@ export default function MapScreenWeb() {
     const watchId = foregroundGeofenceWeb.startTracking(
       (nextLocation) => {
         setLocation(nextLocation);
+        setLocationError('');
         if (
           !visitorMode ||
           visitorStatus !== 'inside' ||
@@ -434,9 +494,11 @@ export default function MapScreenWeb() {
       },
       (error) => {
         setLocationError(error.message);
-        setVisitorError(error.message);
-        if (isAutoCheckoutEnabled) setIsAutoCheckoutEnabled(false);
-        if (isLocationTracking) setIsLocationTracking(false);
+        setLocation(null);
+        if (!('code' in error) || error.code === 1) {
+          if (isAutoCheckoutEnabled) setIsAutoCheckoutEnabled(false);
+          if (isLocationTracking) setIsLocationTracking(false);
+        }
       },
     );
 
@@ -595,7 +657,7 @@ export default function MapScreenWeb() {
 
   const toggleRouteRegion = (region: VietnamRegion) => {
     const regionPoiIds = pois
-      .filter((poi) => getVietnamRegion(poi.latitude) === region)
+      .filter((poi) => getVietnamRegion(poi) === region)
       .map((poi) => poi.id);
     if (regionPoiIds.length === 0) return;
 
@@ -694,31 +756,6 @@ export default function MapScreenWeb() {
   };
 
   // Hàm kích hoạt giọng đọc trình duyệt (TTS) theo đúng ngôn ngữ hiện tại
-  const handleSpeak = useCallback((text?: string) => {
-    if (!text) return;
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel(); // Dừng đoạn đọc cũ nếu có
-
-      const utterance = new SpeechSynthesisUtterance(text);
-
-      if (currentLang === 'vi') utterance.lang = 'vi-VN';
-      else if (currentLang === 'en') utterance.lang = 'en-US';
-      else if (currentLang === 'zh') utterance.lang = 'zh-CN';
-
-      utterance.rate = 1.0;
-
-      utterance.onstart = () => setIsSpeaking(true);
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => setIsSpeaking(false);
-
-      window.speechSynthesis.speak(utterance);
-    } else {
-      alert('Trình duyệt của bạn không hỗ trợ tính năng phát âm thanh (TTS).');
-    }
-  }, [currentLang]);
-
-  announceRef.current = handleSpeak;
-
   useEffect(() => {
     if (!isLocationTracking || !location || pois.length === 0) return;
 
@@ -736,33 +773,23 @@ export default function MapScreenWeb() {
     if (!poi) return;
 
     setGeofenceArrivalPoiId(poi.id);
-    setSelectedPoi(poi);
-    const script = poi.ttsScript?.[currentLang] || poi.description?.[currentLang];
-    if (script && typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      announceRef.current(script);
+    if (autoplay && !playback && !document.hidden) {
+      setSelectedPoi(poi);
+      void play(poi);
     }
-  }, [currentLang, isLocationTracking, location, pois]);
+  }, [autoplay, isLocationTracking, location, play, playback, pois]);
 
-  const handleStopSpeech = () => {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      setIsSpeaking(false);
-    }
-  };
-
-  const filteredPois = pois.filter(item => {
-    const nameText = item.name?.[currentLang]?.toLowerCase() || item.name?.vi?.toLowerCase() || '';
-    const descText = item.description?.[currentLang]?.toLowerCase() || item.description?.vi?.toLowerCase() || '';
-    const query = searchQuery.toLowerCase();
-    return nameText.includes(query) || descText.includes(query);
-  });
-
-  if (location) {
-    filteredPois.sort(
-      (first, second) =>
-        evaluatePoi(location, first).distanceMeters - evaluatePoi(location, second).distanceMeters,
-    );
-  }
+  const filteredPois = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    const matches = pois.filter((poi) => {
+      const content = poi.content;
+      return content.name.toLowerCase().includes(query) || content.description.toLowerCase().includes(query);
+    });
+    if (location) matches.sort((a, b) => evaluatePoi(location, a).distanceMeters - evaluatePoi(location, b).distanceMeters);
+    return matches;
+  }, [currentLang, location, pois, searchQuery]);
+  const visiblePois = useMemo(() => catalogRegion === 'all' ? filteredPois :
+    filteredPois.filter((poi) => getVietnamRegion(poi) === catalogRegion), [catalogRegion, filteredPois]);
 
   const toggleLocationTracking = () => {
     if (isLocationTracking) {
@@ -780,64 +807,124 @@ export default function MapScreenWeb() {
   };
 
   const openGoogleMaps = (poi: Poi) => {
-    const destination = poi.mapUrl ||
-      `https://www.google.com/maps/search/?api=1&query=${poi.latitude},${poi.longitude}`;
+    const destination = `https://www.google.com/maps/search/?api=1&query=${poi.latitude},${poi.longitude}`;
     void Linking.openURL(destination);
   };
 
+
+  const ui = explorerText[uiLang];
+  const changeLanguage = (language: string) => {
+    handleStopSpeech();
+    saveLanguage(language);
+    track('change_lang', undefined, language);
+    setCurrentLang(language);
+  };
+  const poiName = (poi: Poi) => poi.content.name;
+  const narration = (poi: Poi) => poi.content.description;
+  const openPoi = useCallback((poi: Poi) => {
+    handleStopSpeech();
+    setSelectedPoi(poi);
+    track('view_poi', poi.backendId);
+    setDetailOpen(true);
+    if (!detailsRef.current?.open) detailsRef.current?.showModal();
+  }, [handleStopSpeech, track]);
+  useEffect(() => {
+    const linkedPoi = managedPoi || (!visitorMode && visitorPoi);
+    if (!linkedPoi || openedLink.current === linkedPoi.id ||
+        (visitorParams?.get('visit') === '1' && !session && !sessionError)) return;
+    openedLink.current = linkedPoi.id;
+    openPoi(linkedPoi);
+  }, [managedPoi, openPoi, session, sessionError, visitorMode, visitorParams, visitorPoi]);
+
+  const activeDetailId = detailOpen ? selectedPoiDraft?.backendId : undefined;
+  useEffect(() => {
+    if (activeDetailId === undefined || !navigator.onLine) return;
+    let active = true;
+    setDetailError('');
+    void getPoiDetail(activeDetailId, currentLang).then((poi) => {
+      if (active) setDetail({ poi, lang: currentLang });
+    }).catch((error: unknown) => {
+      if (active) setDetailError(error instanceof Error ? error.message : 'Không tải được chi tiết điểm tham quan.');
+    });
+    return () => { active = false; };
+  }, [activeDetailId, currentLang]);
+
+  const audioControl = (poi: Poi) => {
+    const content = poi.content;
+    const state = playback?.poiId === poi.id ? playback : null;
+    const languageName = languages.find(({ code }) => code === content.lang)?.name ?? content.lang.toUpperCase();
+    const mode = state?.mode === 'speech' ? audioText.speech : content.audio_url ? audioText.recording : media.noAudio;
+    return <div className="heritage-narration">
+      <AudioControl title={state?.playing ? audioText.pause : t.listen}
+        subtitle={`${mode} · ${content.is_fallback ? `${audioText.fallback} · ` : ''}${languageName}`}
+        playing={Boolean(state?.playing)} onPress={() => void play(poi)} />
+      {state && <div className="heritage-narration-actions">
+        {state.duration > 0 && <input type="range" aria-label={audioText.progress} min={0} max={state.duration}
+          step={0.1} value={state.position} onChange={(event) => seek(event.currentTarget.valueAsNumber)} />}
+        <button type="button" className="heritage-button" onClick={handleStopSpeech}>{t.stop}</button>
+      </div>}
+      {playbackError?.poiId === poi.id && <p role="alert" className="heritage-error">{playbackError.text}</p>}
+    </div>;
+  };
+  const offlineControl = offline.supported && <div className="heritage-offline">
+    <button className="heritage-button" type="button" disabled={offline.isDownloading} onClick={() => void offline.download()}>{audioText.offline}</button>
+    {offline.status && <p role="status">{offline.status}</p>}
+  </div>;
+  const autoplayControl = <label className="heritage-visit-setting">
+    {audioText.auto}
+    <input type="checkbox" role="switch" checked={autoplay}
+      onChange={(event) => { setAutoplay(event.currentTarget.checked); if (event.currentTarget.checked && !isLocationTracking) toggleLocationTracking(); }} />
+  </label>;
   if (visitorMode) {
     return (
-      <View style={styles.visitorContainer}>
-        <View style={styles.visitorHeader}>
-          <Text style={styles.brand}>{t.brand}</Text>
-          <View style={styles.visitorHeaderActions}>
-            {visitorStatus === 'inside' && (
-              <TouchableOpacity
-                style={[styles.locationButton, isLocationTracking && styles.locationButtonActive]}
-                onPress={toggleLocationTracking}
-              >
-                <Text style={[styles.locationButtonText, isLocationTracking && styles.locationButtonTextActive]}>
-                  {isLocationTracking ? t.disableLocation : t.enableLocation}
-                </Text>
-              </TouchableOpacity>
-            )}
-            {(['vi', 'en', 'zh'] as LanguageKey[]).map((lang) => (
-              <TouchableOpacity
-                key={lang}
-                style={[styles.languageButton, currentLang === lang && styles.languageButtonActive]}
-                onPress={() => {
-                  handleStopSpeech();
-                  setCurrentLang(lang);
-                }}
-              >
-                <Text style={[styles.languageText, currentLang === lang && styles.languageTextActive]}>
-                  {lang.toUpperCase()}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-        <ScrollView style={styles.visitorScroll} contentContainerStyle={styles.visitorContent}>
-          <View style={styles.visitorIntro}>
-            <Text style={styles.eyebrow}>{t.visitorTitle}</Text>
-            <Text style={styles.visitorTitle}>
-              {visitorPoi?.name?.[currentLang] || visitorPoi?.name?.vi || t.visitorTitle}
-            </Text>
-            <Text style={styles.visitorMessage}>
-              {visitorStatus === 'loading'
-                ? visitorVisitId && visitorRetryAction === 'check-out'
-                  ? t.visitorExitProgress
-                  : t.visitorCheckIn
-                : visitorStatus === 'inside'
-                  ? t.routeHelp
-                  : visitorStatus === 'exited'
-                    ? t.visitorExitSuccess
-                    : visitorStatus === 'deleted'
-                      ? t.visitDeleted
-                      : visitorError || t.visitorInvalidQr}
-            </Text>
-          </View>
 
+      <main className="heritage-visit" lang={currentLang}>
+        <HeritageHeader>
+          <LanguageSelect value={currentLang} languages={languages} onChange={changeLanguage} />
+        </HeritageHeader>
+        <View style={styles.visitorContent}>
+          <section className="heritage-visit-feature">
+            {visitorPoi?.images.length ? <div className="heritage-card-media"><PoiPhoto poi={visitorPoi} eager /></div> : null}
+            <div className="heritage-visit-copy">
+              {visitorStatus === 'inside' && <span className="heritage-visit-status">{ui.inside}</span>}
+              <h1 className="heritage-title">{visitorPoi ? poiName(visitorPoi) : t.visitorTitle}</h1>
+              {visitorPoi && <><p>{narration(visitorPoi)}</p>
+                <p>{t.coordLabel} · {visitorPoi.latitude}, {visitorPoi.longitude}</p>
+                {audioControl(visitorPoi)}</>}
+              {visitorStatus === 'inside' && visitorPoi ? (
+                <>
+                  <p>{formatVisitTimestamp(visitorEnteredAt, uiLang)}</p>
+                  <div className="heritage-visit-actions">
+                    <button className="heritage-button" onClick={() => document.getElementById('visit-itinerary')?.scrollIntoView({ block: 'start' })}><Icon name="route" />{t.routeButton}</button>
+                    <button className="heritage-button" onClick={() => openGoogleMaps(visitorPoi)}><Icon name="map" />{t.directions}</button>
+                  </div>
+                  <label className="heritage-visit-setting" title={t.autoExitHelp}>
+                    {t.enableAutoExit}
+                    <input type="checkbox" role="switch" checked={isAutoCheckoutEnabled} onChange={() => {
+                      setVisitorError('');
+                      setIsAutoCheckoutEnabled((enabled) => !enabled);
+                    }} />
+                  </label>
+                  <details className="heritage-visit-help"><summary>GPS</summary><p>{t.autoExitHelp}</p></details>
+                  <button className="heritage-button heritage-visit-exit" onClick={() => void handleVisitorAction('check-out')}>{t.visitorExit}</button>
+                </>
+              ) : (
+                <p role="status">
+                  {visitorStatus === 'loading' || isContentLoading
+                    ? visitorRetryAction === 'check-out' ? t.visitorExitProgress : t.visitorCheckIn
+                    : visitorStatus === 'exited' ? t.visitorExitSuccess
+                    : visitorStatus === 'deleted' ? t.visitDeleted
+                    : visitorError || t.visitorInvalidQr}
+                </p>
+              )}
+            </div>
+          </section>
+
+          {catalogError && <p role="status">{catalogError}</p>}
+          {offlineControl}
+          {autoplayControl}
+          {locationError && <p className="heritage-error" role="alert">{locationError}</p>}
+          {visitorStatus === 'inside' && <button className="heritage-button" style={{ marginBottom: 12 }} aria-pressed={isLocationTracking} onClick={toggleLocationTracking}><Icon name="gps" />{isLocationTracking ? t.disableLocation : t.enableLocation}</button>}
           <View style={styles.visitRecordPanel}>
             <View style={styles.visitRecordHeader}>
               <Text style={styles.visitRecordTitle}>{t.visitRecordTitle}</Text>
@@ -850,7 +937,7 @@ export default function MapScreenWeb() {
               <View style={styles.visitRecordCopy}>
                 <Text style={styles.visitRecordLabel}>{t.checkInRecord}</Text>
                 <Text style={styles.visitRecordTime}>
-                  {formatVisitTimestamp(visitorEnteredAt, currentLang) ??
+                  {formatVisitTimestamp(visitorEnteredAt, uiLang) ??
                     (visitorStatus === 'loading' ? t.visitorCheckIn : t.recordPending)}
                 </Text>
               </View>
@@ -869,7 +956,7 @@ export default function MapScreenWeb() {
                       : t.checkOutRecord}
                 </Text>
                 <Text style={styles.visitRecordTime}>
-                  {formatVisitTimestamp(visitorExitedAt, currentLang) ??
+                  {formatVisitTimestamp(visitorExitedAt, uiLang) ??
                     (visitorStatus === 'loading' && visitorRetryAction === 'check-out'
                       ? t.visitorExitProgress
                       : t.recordPending)}
@@ -919,7 +1006,7 @@ export default function MapScreenWeb() {
                       <Text style={styles.routeControlHint}>{t.routeControlsLocked}</Text>
                     )}
                     {(['south', 'north', 'central'] as VietnamRegion[]).map((region) => {
-                      const regionPois = pois.filter((poi) => getVietnamRegion(poi.latitude) === region);
+                      const regionPois = pois.filter((poi) => getVietnamRegion(poi) === region);
                       const regionPoiIds = regionPois.map((poi) => poi.id);
                       const selectedCount = regionPoiIds.filter((poiId) => routePoiIds.includes(poiId)).length;
                       const regionSelected = selectedCount > 0;
@@ -969,10 +1056,10 @@ export default function MapScreenWeb() {
                         >
                           <Text style={styles.poiIndex}>{String(index + 1).padStart(2, '0')}</Text>
                           <Text style={styles.routeOptionName}>
-                            {poi.name?.[currentLang] || poi.name?.vi}
+                            {poi.content.name}
                           </Text>
                           <Text style={styles.routeOptionDescription} numberOfLines={2}>
-                            {poi.description?.[currentLang] || poi.description?.vi}
+                            {poi.content.description}
                           </Text>
                         </TouchableOpacity>
                         {isRoutePickerOpen && (
@@ -1000,10 +1087,10 @@ export default function MapScreenWeb() {
                 <View style={styles.visitorDetailCard}>
                   <Text style={styles.eyebrow}>{t.destinationDetails}</Text>
                   <Text style={styles.visitorDetailTitle}>
-                    {selectedPoi.name?.[currentLang] || selectedPoi.name?.vi}
+                    {poiName(selectedPoi)}
                   </Text>
                   <Text style={styles.detailDescription}>
-                    {selectedPoi.description?.[currentLang] || selectedPoi.description?.vi}
+                    {narration(selectedPoi)}
                   </Text>
                   <View style={styles.coordBox}>
                     <Text style={styles.coordText}>
@@ -1018,32 +1105,7 @@ export default function MapScreenWeb() {
                       </Text>
                     )}
                   </View>
-                  {(selectedPoi.ttsScript?.[currentLang] || selectedPoi.description?.[currentLang] || selectedPoi.description?.vi) && (
-                    <View style={styles.ttsBox}>
-                      <View style={styles.ttsHeaderRow}>
-                        <Text style={styles.ttsTitle}>{t.ttsTitle}</Text>
-                        <TouchableOpacity
-                          style={[styles.speakButton, isSpeaking && styles.stopButton]}
-                          onPress={() => isSpeaking
-                            ? handleStopSpeech()
-                            : handleSpeak(
-                              selectedPoi.ttsScript?.[currentLang] ||
-                              selectedPoi.description?.[currentLang] ||
-                              selectedPoi.description?.vi,
-                            )}
-                        >
-                          <Text style={styles.speakButtonText}>
-                            {isSpeaking ? t.stop : t.listen}
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                      <Text style={styles.ttsText}>
-                        {selectedPoi.ttsScript?.[currentLang] ||
-                          selectedPoi.description?.[currentLang] ||
-                          selectedPoi.description?.vi}
-                      </Text>
-                    </View>
-                  )}
+                  {audioControl(selectedPoi)}
                   <TouchableOpacity
                     style={styles.mapButton}
                     onPress={() => openGoogleMaps(selectedPoi)}
@@ -1055,6 +1117,7 @@ export default function MapScreenWeb() {
             </>
           )}
 
+          <div id="visit-itinerary">
           <View style={styles.routePanel}>
             <Text style={styles.routeTitle}>{t.routeTitle} · {routePoiIds.length}</Text>
             <Text style={styles.routeHelp}>{t.routeHelp}</Text>
@@ -1082,7 +1145,7 @@ export default function MapScreenWeb() {
                 return (
                   <View key={poiId} style={styles.routeStop}>
                     <Text style={styles.routeStopNumber}>{String(index + 1).padStart(2, '0')}</Text>
-                    <Text style={styles.routeStopName}>{poi.name?.[currentLang] || poi.name?.vi}</Text>
+                    <Text style={styles.routeStopName}>{poi.content.name}</Text>
                     <TouchableOpacity
                       accessibilityLabel={t.directions}
                       style={styles.moveButton}
@@ -1147,27 +1210,7 @@ export default function MapScreenWeb() {
             {visitorError && <Text style={styles.errorMessage}>{visitorError}</Text>}
           </View>
 
-          {visitorStatus === 'inside' && (
-            <>
-              <View style={styles.autoExitPanel}>
-                <Text style={styles.autoExitHelp}>{t.autoExitHelp}</Text>
-                <TouchableOpacity
-                  style={[styles.autoExitButton, isAutoCheckoutEnabled && styles.autoExitButtonActive]}
-                  onPress={() => {
-                    setVisitorError('');
-                    setIsAutoCheckoutEnabled((enabled) => !enabled);
-                  }}
-                >
-                  <Text style={[styles.autoExitButtonText, isAutoCheckoutEnabled && styles.autoExitButtonTextActive]}>
-                    {isAutoCheckoutEnabled ? t.disableAutoExit : t.enableAutoExit}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-              <TouchableOpacity style={styles.exitButton} onPress={() => void handleVisitorAction('check-out')}>
-                <Text style={styles.exitButtonText}>{t.visitorExit}</Text>
-              </TouchableOpacity>
-            </>
-          )}
+          </div>
           {visitorStatus === 'error' && visitorVisitId && (
             <TouchableOpacity
               style={styles.primaryButton}
@@ -1181,201 +1224,128 @@ export default function MapScreenWeb() {
               <Text style={styles.newVisitButtonText}>{t.startNewVisit}</Text>
             </TouchableOpacity>
           )}
-        </ScrollView>
-      </View>
+        </View>
+      </main>
     );
   }
 
+  const featuredPoi = managedPoi || (pois[0] && !isContentLoading ? pois[0] : null);
+
   return (
-    <View style={styles.container}>
-      <View style={styles.topbar}>
-        <View>
-          <Text style={styles.brand}>{t.brand}</Text>
-          <Text style={styles.heroTitle}>{t.webTitle}</Text>
-          <Text style={styles.heroSubtitle}>{t.webSubtitle}</Text>
-        </View>
-        <View style={styles.topbarActions}>
-          <TouchableOpacity
-            accessibilityRole="button"
-            style={styles.adminEntryButton}
-            onPress={() => window.location.assign('/?scan=1')}
-          >
-            <Text style={styles.adminEntryButtonText}>▦ Quét QR</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            accessibilityRole="button"
-            style={styles.adminEntryButton}
-            onPress={() => window.location.assign('/admin')}
-          >
-            <Text style={styles.adminEntryButtonText}>Quản trị Admin</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.locationButton, isLocationTracking && styles.locationButtonActive]}
-            onPress={toggleLocationTracking}
-          >
-            <Text style={[styles.locationButtonText, isLocationTracking && styles.locationButtonTextActive]}>
-              {isLocationTracking ? t.disableLocation : t.enableLocation}
-            </Text>
-          </TouchableOpacity>
-          <View style={styles.langContainer}>
-            {(['vi', 'en', 'zh'] as LanguageKey[]).map((lang) => (
-              <TouchableOpacity
-                key={lang}
-                style={[styles.langBtn, currentLang === lang && styles.langBtnActive]}
-                onPress={() => {
-                  handleStopSpeech();
-                  setCurrentLang(lang);
-                }}
-              >
-                <Text style={[styles.langText, currentLang === lang && styles.langTextActive]}>
-                  {lang.toUpperCase()}
-                </Text>
-              </TouchableOpacity>
+    <div className="heritage-page" lang={currentLang}>
+      <HeritageHeader>
+        <nav className="heritage-nav" aria-label={ui.explore}>
+          <span className="heritage-nav-current" aria-current="page">{ui.explore}</span>
+          <button className="heritage-button" onClick={beginDesktopRouteSelection}><Icon name="route" />{t.routeButton}{routePoiIds.length ? ` · ${routePoiIds.length}` : ''}</button>
+          <LanguageSelect value={currentLang} languages={languages} onChange={changeLanguage} />
+          <a className="heritage-button heritage-primary" href={`/?scan=1&lang=${currentLang}`}><Icon name="qr" />{ui.qr}</a>
+        </nav>
+      </HeritageHeader>
+      <main className="heritage-main">
+        {qrCode !== null && <p role="status" className={sessionError || session?.qr_valid === false ? 'heritage-error' : undefined}>
+          {sessionError ? audioText.qrUnavailable : !session || isContentLoading ? audioText.checkingQr
+            : session.qr_valid ? managedPoi ? `${audioText.qrAccepted} ${managedPoi.content.name}`
+              : session.poi_id === null ? audioText.qrAccepted : catalogError || media.qrPoiHidden : t.visitorInvalidQr}
+        </p>}
+        <section className="heritage-hero">
+          <div className="heritage-copy">
+            <span className="heritage-eyebrow">{ui.kicker}</span>
+            <h1>{ui.title}<br /><span>{ui.subtitle}</span></h1>
+            <p>{ui.intro}</p>
+            {featuredPoi && narration(featuredPoi) && audioControl(featuredPoi)}
+          </div>
+          {featuredPoi?.images.length ? (
+            <figure className="heritage-media">
+              <PoiPhoto poi={featuredPoi} eager />
+              <figcaption><Icon name="pin" />{poiName(featuredPoi)}</figcaption>
+            </figure>
+          ) : null}
+        </section>
+        {geofenceArrivalPoi && location && (
+          <section className="heritage-detail" aria-live="polite">
+            <strong>{t.geofenceArrival}: {poiName(geofenceArrivalPoi)}</strong>
+            <p>{t.geofenceDistance}: {formatDistance(evaluatePoi(location, geofenceArrivalPoi).distanceMeters)}</p>
+            {narration(geofenceArrivalPoi) && audioControl(geofenceArrivalPoi)}
+          </section>
+        )}
+        {locationError && <p role="alert" className="heritage-error">{locationError}</p>}
+        <section className="heritage-section" aria-labelledby="destination-list">
+          <div className="heritage-section-heading">
+            <div><h2 id="destination-list">{ui.places}</h2><p>{ui.help}</p></div>
+            <label className="heritage-search">
+              <Icon name="search" />
+              <input type="search" aria-label={t.searchPlaceholder} placeholder={t.searchPlaceholder} value={searchQuery} onChange={(event) => setSearchQuery(event.currentTarget.value)} />
+            </label>
+          </div>
+          <div className="heritage-filters">
+            {(['all', ...regions.map(({ code }) => code).filter((code): code is VietnamRegion =>
+              code === 'north' || code === 'central' || code === 'south')] as const).map((region) => (
+              <button key={region} className="heritage-button" aria-pressed={catalogRegion === region} onClick={() => setCatalogRegion(region)}>
+                {region === 'all' ? ui.all : t.regions[region]}
+              </button>
             ))}
-          </View>
-        </View>
-      </View>
-      {geofenceArrivalPoi && location && (
-        <View style={styles.geofenceNotice}>
-          <View style={styles.geofenceNoticeCopy}>
-            <Text style={styles.geofenceNoticeTitle}>
-              {t.geofenceArrival}: {geofenceArrivalPoi.name?.[currentLang] || geofenceArrivalPoi.name.vi}
-            </Text>
-            <Text style={styles.geofenceNoticeDistance}>
-              {t.geofenceDistance}: {formatDistance(evaluatePoi(location, geofenceArrivalPoi).distanceMeters)}
-            </Text>
-          </View>
-          <TouchableOpacity
-            style={styles.geofenceListenButton}
-            onPress={() => handleSpeak(
-              geofenceArrivalPoi.ttsScript?.[currentLang] ||
-              geofenceArrivalPoi.description?.[currentLang] ||
-              geofenceArrivalPoi.description.vi,
-            )}
-          >
-            <Text style={styles.geofenceListenText}>{t.listen}</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-      {locationError ? <Text style={styles.statusError}>{locationError}</Text> : null}
-      <View style={styles.contentRow}>
-        <View style={styles.sidebar}>
-        <View style={styles.headerRow}>
-          <Text style={styles.headerTitle}>{t.locationLabel}</Text>
-          <TouchableOpacity
-            style={styles.desktopRouteButton}
-            onPress={beginDesktopRouteSelection}
-          >
-            <Text style={styles.desktopRouteButtonText}>
-              {`${t.routeButton}${routePoiIds.length ? ` · ${routePoiIds.length}` : ''}`}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        <TextInput
-          style={styles.searchInput}
-          placeholder={t.searchPlaceholder}
-          placeholderTextColor="#888"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-
-        <View style={styles.poiListViewport}>
-          <ScrollView style={styles.poiListScroll}>
-            {filteredPois.map((poi, index) => {
-              const isSelected = selectedPoi?.id === poi.id;
+            <button className="heritage-button heritage-gps" aria-pressed={isLocationTracking} onClick={toggleLocationTracking}>
+              <Icon name="gps" />{isLocationTracking ? t.disableLocation : t.enableLocation}
+            </button>
+            {autoplayControl}
+          </div>
+          {isLocationTracking && <p role="status">{location ? `${audioText.position} · ${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}` : audioText.finding}</p>}
+          {catalogError && <p role="status">{catalogError}</p>}
+          {optionsError && <p role="status">{optionsError}</p>}
+          {offlineControl}
+          {isContentLoading && <p role="status">{ui.loading}</p>}
+          {!isContentLoading && !visiblePois.length && (!catalogError || pois.length > 0) && <p role="status">{pois.length ? t.noDestinationsFound : media.noPois}</p>}
+          <PoiMap pois={visiblePois} position={location} label={audioText.map} positionLabel={audioText.position} tileErrorLabel={media.noTiles} select={openPoi} />
+          <div className="heritage-grid">
+            {visiblePois.map((poi, index) => {
+              const onRoute = routePoiIds.includes(poi.id);
               return (
-                <View
-                  key={poi.id}
-                  style={[styles.poiCard, isSelected && styles.poiCardSelected]}
-                >
-                  <TouchableOpacity
-                    onPress={() => {
-                      handleStopSpeech();
-                      setSelectedPoi(poi);
-                    }}
-                  >
-                    <Text style={styles.poiIndex}>{String(index + 1).padStart(2, '0')}</Text>
-                    <Text style={styles.poiName}>{poi.name?.[currentLang] || poi.name?.vi}</Text>
-                    <Text style={styles.poiDesc} numberOfLines={2}>{poi.description?.[currentLang] || poi.description?.vi}</Text>
-                    <View style={styles.poiBadgeRow}>
-                      <Text style={styles.badge}>{t.radiusBadge}: {poi.radiusMeters}m</Text>
-                      <Text style={styles.badgePriority}>{t.priorityBadge}: {poi.priority}</Text>
-                      {location && (
-                        <Text style={styles.badgeDistance}>
-                          {formatDistance(evaluatePoi(location, poi).distanceMeters)}
-                        </Text>
-                      )}
-                    </View>
-                  </TouchableOpacity>
-                </View>
+                <article className="heritage-card" key={poi.id}>
+                  {poi.images.length > 0 && <div className="heritage-card-media"><PoiPhoto poi={poi} eager={index < 3} /></div>}
+                  <div className="heritage-card-body">
+                    <div className="heritage-card-meta"><Icon name="pin" />
+                      {regions.find(({ code }) => code === poi.regionCode)?.name_vi}
+                      {location && ` · ${formatDistance(evaluatePoi(location, poi).distanceMeters)}`}
+                    </div>
+                    <h3>{poiName(poi)}</h3>
+                    <div className="heritage-card-actions">
+                      <button className="heritage-button heritage-link" onClick={() => openPoi(poi)}><Icon name="arrow" />{ui.details}</button>
+                      <button className="heritage-button" aria-pressed={onRoute} onClick={() => toggleRoutePoi(poi.id)}>
+                        <Icon name={onRoute ? 'check' : 'add'} />{onRoute ? t.removeStop : t.addStop}
+                      </button>
+                    </div>
+                  </div>
+                </article>
               );
             })}
-          </ScrollView>
-        </View>
-      </View>
-
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: 'auto',
-          overflowX: 'hidden',
-        }}
-      >
-      <View style={styles.mapContainer}>
-        {selectedPoi ? (
-          <View style={styles.detailCard}>
-            <Text style={styles.eyebrow}>{t.detailsLabel}</Text>
-            <Text style={styles.detailTitle}>{selectedPoi.name?.[currentLang] || selectedPoi.name?.vi}</Text>
-            <Text style={styles.detailDescription}>{selectedPoi.description?.[currentLang] || selectedPoi.description?.vi}</Text>
-
-            <View style={styles.coordBox}>
-              <Text style={styles.coordText}>{t.coordLabel}: {selectedPoi.latitude}, {selectedPoi.longitude}</Text>
-              <Text style={styles.coordText}>{t.radiusLabel}: {selectedPoi.radiusMeters} {t.metersUnit}</Text>
-            </View>
-
-            {selectedPoi.ttsScript?.[currentLang] && (
-              <View style={styles.ttsBox}>
-                <View style={styles.ttsHeaderRow}>
-                  <Text style={styles.ttsTitle}>{t.ttsTitle}:</Text>
-                  <TouchableOpacity
-                    style={[styles.speakButton, isSpeaking && styles.stopButton]}
-                    onPress={() => {
-                      if (isSpeaking) {
-                        handleStopSpeech();
-                      } else {
-                        handleSpeak(selectedPoi.ttsScript?.[currentLang]);
-                      }
-                    }}
-                  >
-                    <Text style={styles.speakButtonText}>
-                      {isSpeaking ? t.stop : t.listen}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.ttsText}>{selectedPoi.ttsScript[currentLang]}</Text>
-              </View>
-            )}
-
-            <TouchableOpacity
-              style={styles.mapButton}
-              onPress={() => openGoogleMaps(selectedPoi)}
-            >
-              <Text style={styles.mapButtonText}>↗  {t.directions}</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={styles.mapMockup}>
-            <Text style={styles.mapMockupText}>{t.selectPrompt}</Text>
-          </View>
+          </div>
+        </section>
+        <footer className="heritage-footer">
+          <a href="/admin">{ui.admin}</a>
+        </footer>
+      </main>
+      <dialog className="heritage-dialog" ref={detailsRef} aria-labelledby="destination-details" onClose={() => {
+        handleStopSpeech();
+        setDetailOpen(false);
+        setDetailError('');
+      }}>
+        {selectedPoi && (
+          <section className="heritage-detail">
+            <h2 id="destination-details">{poiName(selectedPoi)}</h2>
+            {detailError && <p role="alert" className="heritage-error">{detailError}</p>}
+            {selectedPoi.images.length > 0 && <div className="heritage-detail-media"><PoiPhoto poi={selectedPoi} /></div>}
+            <p lang={selectedPoi.content.lang}>{narration(selectedPoi)}</p>
+            <p>{t.coordLabel}: {selectedPoi.latitude}, {selectedPoi.longitude} · {t.radiusLabel}: {selectedPoi.radiusMeters} {t.metersUnit}</p>
+            {audioControl(selectedPoi)}
+            <div className="heritage-card-actions">
+              <button className="heritage-button" onClick={() => openGoogleMaps(selectedPoi)}><Icon name="map" />{t.directions}</button>
+              <button className="heritage-button" onClick={() => detailsRef.current?.close()} aria-label={currentLang === 'vi' ? 'Đóng' : currentLang === 'en' ? 'Close' : '关闭'}>×</button>
+            </div>
+          </section>
         )}
-      </View>
-      </div>
-      </View>
-      {isRoutePickerOpen && (
-        <View style={styles.desktopRouteOverlay}>
-          <View style={styles.desktopRouteDialog}>
+      </dialog>
+      <dialog className="heritage-dialog" ref={routeDialogRef} aria-label={t.routeTitle} onClose={() => setIsRoutePickerOpen(false)}>
+          <div>
             <View style={styles.desktopRouteDialogHeader}>
               <View style={styles.routeOptionCopy}>
                 <Text style={styles.routeTitle}>{t.routeTitle} · {routePoiIds.length}</Text>
@@ -1383,19 +1353,20 @@ export default function MapScreenWeb() {
               </View>
               <TouchableOpacity
                 style={styles.moveButton}
+                accessibilityRole="button"
                 accessibilityLabel={t.closeRoutePicker}
                 onPress={() => setIsRoutePickerOpen(false)}
               >
                 <Text style={styles.moveButtonText}>×</Text>
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.desktopRouteDialogScroll}>
+            <div className="heritage-dialog-body">
               <Text style={styles.routeHelp}>{t.regionHelp}</Text>
               {visitorStatus !== 'inside' && (
                 <Text style={styles.routeControlHint}>{t.routeCanEditBeforeCheckIn}</Text>
               )}
               {(['south', 'north', 'central'] as VietnamRegion[]).map((region) => {
-                const regionPois = pois.filter((poi) => getVietnamRegion(poi.latitude) === region);
+                const regionPois = pois.filter((poi) => getVietnamRegion(poi) === region);
                 if (regionPois.length === 0) return null;
                 const regionPoiIds = regionPois.map((poi) => poi.id);
                 const selectedCount = regionPoiIds.filter((poiId) => routePoiIds.includes(poiId)).length;
@@ -1426,9 +1397,9 @@ export default function MapScreenWeb() {
                 return (
                   <View key={poi.id} style={styles.visitorDestinationCard}>
                     <View style={styles.routeOptionCopy}>
-                      <Text style={styles.routeOptionName}>{poi.name?.[currentLang] || poi.name?.vi}</Text>
+                      <Text style={styles.routeOptionName}>{poi.content.name}</Text>
                       <Text style={styles.routeOptionDescription} numberOfLines={2}>
-                        {poi.description?.[currentLang] || poi.description?.vi}
+                        {poi.content.description}
                       </Text>
                     </View>
                     <TouchableOpacity
@@ -1454,7 +1425,7 @@ export default function MapScreenWeb() {
                 return (
                   <View key={poiId} style={styles.routeStop}>
                     <Text style={styles.routeStopNumber}>{String(index + 1).padStart(2, '0')}</Text>
-                    <Text style={styles.routeStopName}>{poi.name?.[currentLang] || poi.name?.vi}</Text>
+                    <Text style={styles.routeStopName}>{poi.content.name}</Text>
                     <TouchableOpacity
                       accessibilityLabel={t.moveUp}
                       style={[
@@ -1481,8 +1452,8 @@ export default function MapScreenWeb() {
                 );
               })}
               {visitorError && <Text style={styles.errorMessage}>{visitorError}</Text>}
-            </ScrollView>
-            <View style={styles.desktopRouteDialogFooter}>
+            </div>
+            <div className="heritage-dialog-footer">
               {routePoiIds.length > 0 && (
                 <TouchableOpacity
                   style={styles.clearRouteButton}
@@ -1510,182 +1481,14 @@ export default function MapScreenWeb() {
                   {isSavingRoute ? t.savingRoute : t.confirmRoute}
                 </Text>
               </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      )}
-    </View>
+            </div>
+          </div>
+      </dialog>
+    </div>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f2f8ff',
-  },
-  topbar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 14,
-    paddingHorizontal: 32,
-    paddingVertical: 18,
-    backgroundColor: '#ffffff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2ebf4',
-  },
-  topbarActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-end',
-    gap: 8,
-  },
-  adminEntryButton: {
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#b8d7c4',
-    backgroundColor: '#eef7f1',
-    paddingHorizontal: 13,
-    paddingVertical: 8,
-  },
-  adminEntryButtonText: {
-    color: '#286847',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  brand: {
-    color: '#388557',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 2,
-    marginBottom: 8,
-  },
-  heroTitle: {
-    color: '#203548',
-    fontSize: 30,
-    fontWeight: '800',
-    marginBottom: 5,
-  },
-  heroSubtitle: {
-    color: '#617487',
-    fontSize: 14,
-  },
-  contentRow: {
-    flex: 1,
-    flexDirection: 'row',
-    minHeight: 0,
-  },
-  sidebar: {
-    width: '29%',
-    maxWidth: 500,
-    minWidth: 340,
-    flexShrink: 0,
-    backgroundColor: '#ffffff',
-    borderRightWidth: 1,
-    borderRightColor: '#e2ebf4',
-    paddingHorizontal: 28,
-    paddingVertical: 24,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 14,
-  },
-  headerTitle: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#748077',
-    letterSpacing: 1.4,
-  },
-  langContainer: {
-    flexDirection: 'row',
-    gap: 6,
-    flexShrink: 0,
-  },
-  locationButton: {
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#cfe0ed',
-    backgroundColor: '#f4f9ff',
-    paddingHorizontal: 13,
-    paddingVertical: 8,
-  },
-  locationButtonActive: {
-    backgroundColor: '#e5f5e9',
-    borderColor: '#b8e2c4',
-  },
-  locationButtonText: {
-    color: '#456b83',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  locationButtonTextActive: {
-    color: '#287548',
-  },
-  statusError: {
-    paddingHorizontal: 28,
-    paddingVertical: 8,
-    backgroundColor: '#fff1ed',
-    color: '#a94f42',
-    fontSize: 12,
-  },
-  geofenceNotice: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingHorizontal: 28,
-    paddingVertical: 13,
-    backgroundColor: '#e9f7ed',
-    borderBottomWidth: 1,
-    borderBottomColor: '#cbe8d3',
-  },
-  geofenceNoticeCopy: {
-    flex: 1,
-  },
-  geofenceNoticeTitle: {
-    color: '#286a43',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  geofenceNoticeDistance: {
-    color: '#62826d',
-    fontSize: 11,
-    marginTop: 4,
-  },
-  geofenceListenButton: {
-    backgroundColor: '#3d9b62',
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-  },
-  geofenceListenText: {
-    color: '#ffffff',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  langBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 20,
-    backgroundColor: '#eff6fb',
-    borderWidth: 1,
-    borderColor: '#eff6fb',
-  },
-  langBtnActive: {
-    backgroundColor: '#e5f5e9',
-    borderColor: '#b8e2c4',
-  },
-  langText: {
-    color: '#7b857c',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  langTextActive: {
-    color: '#287548',
-  },
   searchInput: {
     backgroundColor: '#f4f9ff',
     borderWidth: 1,
@@ -1696,86 +1499,13 @@ const styles = StyleSheet.create({
     color: '#24394a',
     marginBottom: 20,
   },
-  poiListViewport: {
-    flex: 1,
-    minHeight: 0,
-  },
-  desktopRouteButton: {
-    borderWidth: 1,
-    borderColor: '#cfe0ed',
-    borderRadius: 18,
-    backgroundColor: '#f4f9ff',
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  desktopRouteButtonText: {
-    color: '#456b83',
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  desktopRouteOverlay: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    zIndex: 20,
-    backgroundColor: 'rgba(27, 46, 61, 0.38)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  desktopRouteDialog: {
-    width: '100%',
-    maxWidth: 760,
-    height: '86%',
-    backgroundColor: '#ffffff',
-    borderRadius: 20,
-    padding: 22,
-    borderWidth: 1,
-    borderColor: '#dce8f2',
-    shadowColor: '#203548',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.18,
-    shadowRadius: 28,
-    elevation: 12,
-  },
   desktopRouteDialogHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#e2ebf4',
-  },
-  desktopRouteDialogScroll: {
-    flex: 1,
-    minHeight: 0,
-    marginTop: 14,
-  },
-  desktopRouteDialogFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#e2ebf4',
-  },
-  poiListScroll: {
-    flex: 1,
-  },
-  poiCard: {
-    backgroundColor: '#ffffff',
-    padding: 16,
-    borderRadius: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#e3edf5',
-  },
-  poiCardSelected: {
-    borderColor: '#8ed2a1',
-    backgroundColor: '#eefaf1',
+    borderBottomColor: '#dedbd0',
   },
   poiIndex: {
     color: '#829281',
@@ -1784,66 +1514,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginBottom: 8,
   },
-  poiName: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#25372a',
-    marginBottom: 6,
-  },
-  poiDesc: {
-    fontSize: 13,
-    color: '#7a8279',
-    lineHeight: 19,
-    marginBottom: 12,
-  },
-  poiBadgeRow: {
-    flexDirection: 'row',
-    gap: 6,
-    flexWrap: 'wrap',
-  },
-  badge: {
-    fontSize: 11,
-    color: '#7d7253',
-    backgroundColor: '#f4f0e4',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  badgePriority: {
-    fontSize: 11,
-    color: '#537456',
-    backgroundColor: '#eaf1e8',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  badgeDistance: {
-    fontSize: 11,
-    color: '#456b83',
-    backgroundColor: '#edf7ff',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  mapContainer: {
-    flex: 1,
-    backgroundColor: '#f2f8ff',
-    padding: 44,
-  },
-  detailCard: {
-    width: '100%',
-    maxWidth: 760,
-    alignSelf: 'center',
-    backgroundColor: '#ffffff',
-    borderRadius: 22,
-    padding: 36,
-    borderWidth: 1,
-    borderColor: '#e3edf5',
-    shadowColor: '#475748',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.06,
-    shadowRadius: 28,
-  },
   eyebrow: {
     color: '#738571',
     fontSize: 11,
@@ -1851,15 +1521,9 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     marginBottom: 12,
   },
-  detailTitle: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: '#25372a',
-    marginBottom: 10,
-  },
   detailDescription: {
     fontSize: 15,
-    color: '#6d786e',
+    color: '#546057',
     lineHeight: 24,
     marginBottom: 22,
   },
@@ -1921,65 +1585,20 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   mapButtonText: {
-    color: '#ffffff',
+    color: '#fffcf6',
     fontSize: 14,
     fontWeight: '800',
   },
-  visitorContainer: {
-    flex: 1,
-    backgroundColor: '#f2f8ff',
-  },
-  visitorHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: '#ffffff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2ebf4',
-  },
-  visitorHeaderActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  visitorScroll: {
-    flex: 1,
-  },
   visitorContent: {
     width: '100%',
-    maxWidth: 820,
-    alignSelf: 'center',
+    maxWidth: 610,
+    marginHorizontal: 'auto',
     paddingHorizontal: 18,
     paddingTop: 20,
     paddingBottom: 48,
   },
-  visitorIntro: {
-    backgroundColor: '#ffffff',
-    borderWidth: 1,
-    borderColor: '#e3edf5',
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 18,
-  },
-  visitorTitle: {
-    color: '#25372a',
-    fontWeight: '800',
-    fontSize: 25,
-    marginBottom: 10,
-  },
-  visitorMessage: {
-    color: '#6d786e',
-    fontSize: 14,
-    lineHeight: 22,
-    marginBottom: 0,
-  },
   visitRecordPanel: {
-    backgroundColor: '#ffffff',
+    backgroundColor: '#fffcf6',
     borderWidth: 1,
     borderColor: '#dceaf4',
     borderRadius: 18,
@@ -2069,15 +1688,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0f5f9',
   },
   routePanel: {
-    backgroundColor: '#ffffff',
+    backgroundColor: '#fffcf6',
     borderWidth: 1,
-    borderColor: '#e3edf5',
+    borderColor: '#dedbd0',
     borderRadius: 20,
     padding: 24,
     marginBottom: 16,
   },
   routeTitle: {
-    color: '#25372a',
+    color: '#202a23',
     fontSize: 19,
     fontWeight: '800',
     marginBottom: 7,
@@ -2088,45 +1707,9 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 16,
   },
-  sectionLabel: {
-    color: '#748077',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1,
-    marginTop: 8,
-    marginBottom: 10,
-  },
-  routeOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    borderWidth: 1,
-    borderColor: '#e3edf5',
-    borderRadius: 13,
-    padding: 13,
-    marginBottom: 9,
-    backgroundColor: '#ffffff',
-  },
   routeOptionSelected: {
     borderColor: '#9bd9aa',
     backgroundColor: '#effaf2',
-  },
-  routeCheckbox: {
-    width: 26,
-    height: 26,
-    borderWidth: 1,
-    borderColor: '#cbd2c8',
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  routeCheckboxSelected: {
-    backgroundColor: '#3d9b62',
-    borderColor: '#3d9b62',
-  },
-  routeCheckboxText: {
-    color: '#ffffff',
-    fontWeight: '800',
   },
   routeOptionCopy: {
     flex: 1,
@@ -2136,11 +1719,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     borderWidth: 1,
-    borderColor: '#e3edf5',
+    borderColor: '#dedbd0',
     borderRadius: 13,
     padding: 13,
     marginBottom: 9,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#fffcf6',
   },
   routeActionButton: {
     borderRadius: 16,
@@ -2221,15 +1804,15 @@ const styles = StyleSheet.create({
     color: '#287548',
   },
   visitorDetailCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: '#fffcf6',
     borderWidth: 1,
-    borderColor: '#e3edf5',
+    borderColor: '#dedbd0',
     borderRadius: 20,
     padding: 20,
     marginBottom: 16,
   },
   visitorDetailTitle: {
-    color: '#25372a',
+    color: '#202a23',
     fontSize: 25,
     fontWeight: '800',
     marginBottom: 10,
@@ -2253,41 +1836,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
-  autoExitPanel: {
-    backgroundColor: '#ffffff',
-    borderWidth: 1,
-    borderColor: '#dceaf4',
-    borderRadius: 16,
-    padding: 18,
-    marginBottom: 14,
-  },
-  autoExitHelp: {
-    color: '#687b89',
-    fontSize: 12,
-    lineHeight: 19,
-    marginBottom: 12,
-  },
-  autoExitButton: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#eff7ff',
-    borderWidth: 1,
-    borderColor: '#d1e5f3',
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-  },
-  autoExitButtonActive: {
-    backgroundColor: '#e5f5e9',
-    borderColor: '#b8e2c4',
-  },
-  autoExitButtonText: {
-    color: '#456b83',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  autoExitButtonTextActive: {
-    color: '#287548',
-  },
   moveButton: {
     width: 30,
     height: 30,
@@ -2309,7 +1857,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   primaryButtonText: {
-    color: '#ffffff',
+    color: '#fffcf6',
     fontSize: 14,
     fontWeight: '800',
   },
@@ -2342,19 +1890,6 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     marginTop: 12,
   },
-  exitButton: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#f4e9e5',
-    borderRadius: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 13,
-    marginTop: 2,
-  },
-  exitButtonText: {
-    color: '#9a4c41',
-    fontSize: 13,
-    fontWeight: '800',
-  },
   newVisitButton: {
     alignSelf: 'flex-start',
     backgroundColor: '#e5f5e9',
@@ -2369,31 +1904,5 @@ const styles = StyleSheet.create({
     color: '#287548',
     fontSize: 13,
     fontWeight: '800',
-  },
-  languageButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 20,
-    backgroundColor: '#eff6fb',
-  },
-  languageButtonActive: {
-    backgroundColor: '#e5f5e9',
-  },
-  languageText: {
-    color: '#7b857c',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  languageTextActive: {
-    color: '#287548',
-  },
-  mapMockup: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  mapMockupText: {
-    color: '#778177',
-    fontSize: 16,
   },
 });

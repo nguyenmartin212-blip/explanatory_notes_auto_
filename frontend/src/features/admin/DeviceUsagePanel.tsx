@@ -11,7 +11,7 @@ const dateTime = new Intl.DateTimeFormat('vi-VN', {
 });
 const formatTime = (value: string) => dateTime.format(new Date(value));
 
-export function DeviceUsagePanel() {
+export function DeviceUsagePanel({ compact = false }: { compact?: boolean }) {
   const [filters, setFilters] = useState(INITIAL_FILTERS);
   const [applied, setApplied] = useState(INITIAL_FILTERS);
   const [report, setReport] = useState<DeviceUsageReport | null>(null);
@@ -72,7 +72,10 @@ export function DeviceUsagePanel() {
 
   return (
     <section className="device-usage" aria-label="Thống kê thiết bị">
-      <form className="device-usage__filters" onSubmit={applyFilters}>
+      <h2 className="device-usage__title">Thiết bị đăng nhập</h2>
+      <details className="device-usage__options" open={!compact || undefined}>
+        <summary>{applied.period === 'day' ? 'Theo ngày' : 'Theo tháng'}{report ? ` · ${report.from} – ${report.to}` : ''}</summary>
+        <form className="device-usage__filters" onSubmit={applyFilters}>
         <label>
           Nhóm theo
           <select
@@ -100,14 +103,15 @@ export function DeviceUsagePanel() {
           />
         </label>
         <button type="submit">Áp dụng</button>
-      </form>
-      {filterError && <p className="device-usage__error" role="alert">{filterError}</p>}
+        </form>
+        {filterError && <p className="device-usage__error" role="alert">{filterError}</p>}
+      </details>
       {error && <p className="device-usage__error" role="alert">{error}</p>}
       {loading && <p className="device-usage__note" role="status">Đang tải thống kê…</p>}
 
       {report && (
         <>
-          <dl className="device-usage__summary">
+          {!compact && <><dl className="device-usage__summary">
             <div>
               <dt>Thiết bị online</dt>
               <dd>{report.active_device_count.toLocaleString('vi-VN')}</dd>
@@ -119,9 +123,11 @@ export function DeviceUsagePanel() {
           </dl>
           <p className="device-usage__note">
             Từ {report.from} đến {report.to} (UTC). Cập nhật lúc {formatTime(report.generated_at)} UTC.
-          </p>
+          </p></>}
 
-          <section aria-labelledby="device-usage-active">
+          {report.usage.length > 0 && <DeviceUsageChart usage={report.usage} />}
+
+          {!compact && <section aria-labelledby="device-usage-active">
             <h2 id="device-usage-active">Thiết bị đang hoạt động</h2>
             {report.active_devices.length ? (
               <div className="device-usage__table">
@@ -139,9 +145,9 @@ export function DeviceUsagePanel() {
                 </table>
               </div>
             ) : <p className="device-usage__note">Chưa có thiết bị gửi tín hiệu trong 2 phút gần đây.</p>}
-          </section>
+          </section>}
 
-          <section aria-labelledby="device-usage-history">
+          {!compact && <section aria-labelledby="device-usage-history">
             <h2 id="device-usage-history">Phiên sử dụng theo {report.period === 'day' ? 'ngày' : 'tháng'}</h2>
             {report.usage.length ? (
               <div className="device-usage__table">
@@ -159,9 +165,32 @@ export function DeviceUsagePanel() {
                 </table>
               </div>
             ) : <p className="device-usage__note">Chưa ghi nhận phiên sử dụng trong khoảng ngày này.</p>}
-          </section>
+          </section>}
+          {compact && report.usage.length === 0 && <p className="device-usage__note">Chưa ghi nhận phiên sử dụng trong khoảng ngày này.</p>}
         </>
       )}
     </section>
+  );
+}
+
+function DeviceUsageChart({ usage }: { usage: DeviceUsageReport['usage'] }) {
+  const highest = Math.max(...usage.map((row) => row.uniqueDevices), 1);
+  const step = Math.ceil(highest / 4);
+  const ticks = [4, 3, 2, 1, 0].map((tick) => tick * step);
+  return (
+    <figure className="device-usage__chart">
+      <figcaption>Số thiết bị duy nhất theo thời gian</figcaption>
+      <div className="device-usage__plot">
+        <div className="device-usage__axis" aria-hidden="true">{ticks.map((tick) => <span key={tick}>{tick}</span>)}</div>
+        <ul className="device-usage__bars" aria-label="Số thiết bị theo kỳ (UTC)">
+          {usage.map((row) => (
+            <li key={row.period} aria-label={`${row.period}: ${row.uniqueDevices} thiết bị`} title={`${row.period}: ${row.uniqueDevices} thiết bị`}>
+              <span className="device-usage__bar" style={{ height: `${row.uniqueDevices / (step * 4) * 100}%` }} />
+              <span className="device-usage__period">{row.period.length === 7 ? row.period.replace(/^(\d{4})-(\d{2})$/, '$2/$1') : row.period.slice(5).split('-').reverse().join('/')}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </figure>
   );
 }

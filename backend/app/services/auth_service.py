@@ -1,188 +1,85 @@
-"""Login, token refresh/rotation, logout and request authentication.
+from sqlalchemy.orm import Session
 
-- Passwords are verified with bcrypt (see app.auth.passwords). An unknown username
-  costs the same time as a wrong password and gives the same error.
-- A token is valid only if: signature/expiry/type are valid, its jti is not on the
-  revocation list (Redis), the user still exists and is active, and the token's
-  `ver` equals the user's `token_version`.
-- Refresh tokens are single use (rotation): using one revokes it atomically.
-- If the revocation list (Redis) cannot be reached the request is refused
-  (fail closed, HTTP 503): a logged-out token must never be accepted by accident.
-"""
-
-from __future__ import annotations
-
-import logging
-from datetime import datetime, timedelta, timezone
-
-from app.auth.constants import ACCESS_TOKEN_MINUTES, JWT_LEEWAY_SECONDS, REFRESH_TOKEN_DAYS
-from app.auth.context import AuthContext, build_context
-from app.auth.cccd import mask_cccd  # noqa: F401  (re-exported for views)
-from app.auth.passwords import default_hasher
-from app.auth.permissions import OWNER_UNVERIFIED_ALLOWED, POI_OWNER_ROLE, WILDCARD
-from app.auth.tokens import ACCESS, REFRESH, SessionTokens, TokenClaims, create_session_tokens, decode_token
-from app.core.errors import AuthenticationError
-from app.stores import admin_user_store, role_store
-
-logger = logging.getLogger(__name__)
-
-REVOKED_PREFIX = "auth:revoked:"
+from app.core.exceptions import AppError
+from app.core.security import create_access_token, hash_password, verify_password
+from app.services import audit_service
+from app.stores import admin_store
 
 
-# --------------------------------------------------------------------------- #
-# Revocation list (Redis)
-# --------------------------------------------------------------------------- #
-def _ttl_seconds(claims: TokenClaims, now: datetime) -> int:
-    return max(int((claims.expires_at - now).total_seconds()), 0) + JWT_LEEWAY_SECONDS + 1
+# ------------------------------------------------------------ UC-13 Đăng nhập
+def login(db: Session, username: str, password: str) -> str:
+    """Đúng tài khoản + mật khẩu thì trả về token. Thông báo lỗi cố ý chung chung."""
+    admin = admin_store.get_by_username(db, username)
+    if admin is None or not admin.is_active or not verify_password(password, admin.password_hash):
+        raise AppError(401, "Sai tài khoản hoặc mật khẩu")
+    return create_access_token(admin.id, admin.role)
 
 
-async def _is_revoked(redis, jti: str) -> bool:
-    try:
-        return bool(await redis.exists(REVOKED_PREFIX + jti))
-    except Exception as exc:
-        logger.error("Cannot read the token revocation list: %s", exc)
-        raise AuthenticationError("auth_unavailable", "Authentication is temporarily unavailable") from exc
+def change_own_password(db: Session, admin, old_password: str, new_password: str) -> None:
+    if not verify_password(old_password, admin.password_hash):
+        raise AppError(400, "Mật khẩu cũ không đúng")
+    admin_store.update(db, admin, {"password_hash": hash_password(new_password)})
+    audit_service.log(db, admin, "change_own_password", "admin_users", admin.id)
 
 
-async def _revoke(redis, claims: TokenClaims, now: datetime) -> bool:
-    """Put the token on the revocation list. Returns False if it already was
-    (atomic SET NX), so concurrent uses of one refresh token cannot both win."""
-    try:
-        done = await redis.set(REVOKED_PREFIX + claims.jti, "1", ex=_ttl_seconds(claims, now), nx=True)
-    except Exception as exc:
-        logger.error("Cannot write the token revocation list: %s", exc)
-        raise AuthenticationError("auth_unavailable", "Authentication is temporarily unavailable") from exc
-    return bool(done)
+# ------------------------------------------------- UC-12 Quản lý tài khoản admin
+def _get_or_404(db: Session, admin_id: int):
+    target = admin_store.get_by_id(db, admin_id)
+    if target is None:
+        raise AppError(404, "Không tìm thấy tài khoản")
+    return target
 
 
-# --------------------------------------------------------------------------- #
-# Checks shared by every flow
-# --------------------------------------------------------------------------- #
-def _check_user(user: dict | None, claims: TokenClaims) -> dict:
-    if user is None or claims.token_version != user.get("token_version", 0):
-        raise AuthenticationError("invalid_token")
-    if not user.get("is_active", False):
-        raise AuthenticationError("account_disabled")
-    return user
+def _ensure_another_super_admin(db: Session) -> None:
+    """Hệ thống luôn phải còn ít nhất 1 Super Admin đang hoạt động."""
+    if admin_store.count_active_super_admins(db) <= 1:
+        raise AppError(400, "Phải luôn còn ít nhất một Super Admin đang hoạt động")
 
 
-# --------------------------------------------------------------------------- #
-# Flows
-# --------------------------------------------------------------------------- #
-async def login(
-    db, settings, username: str, password: str, *, hasher=default_hasher, now: datetime | None = None
-) -> tuple[dict, SessionTokens]:
-    now = now or datetime.now(timezone.utc)
-    username = (username or "").strip().lower()
-    user = await admin_user_store.get_by_username(db, username) if username else None
-
-    if user is None:
-        await hasher.dummy_verify(password or "")
-        raise AuthenticationError("invalid_credentials", "Wrong username or password")
-    if not await hasher.verify(password or "", user.get("password_hash")):
-        raise AuthenticationError("invalid_credentials", "Wrong username or password")
-    if not user.get("is_active", False):
-        raise AuthenticationError("account_disabled", "This account is disabled")
-
-    await admin_user_store.record_login(db, user["user_id"], now)
-    session = create_session_tokens(
-        settings, user_id=user["user_id"], token_version=user.get("token_version", 0), now=now
-    )
-    return user, session
+def create_admin(db: Session, username: str, password: str, role: str, by_admin=None):
+    if admin_store.get_by_username(db, username) is not None:
+        raise AppError(400, "Tên đăng nhập đã tồn tại")
+    admin = admin_store.create(db, username, hash_password(password), role)
+    audit_service.log(db, by_admin, "create_admin", "admin_users", admin.id)
+    return admin
 
 
-async def refresh_session(
-    db, redis, settings, refresh_token: str | None, *, now: datetime | None = None
-) -> tuple[dict, SessionTokens]:
-    """Exchange a refresh token for a new access + refresh pair (rotation)."""
-    now = now or datetime.now(timezone.utc)
-    claims = decode_token(settings, refresh_token, REFRESH)
-    if await _is_revoked(redis, claims.jti):
-        raise AuthenticationError("invalid_token")
-    user = _check_user(await admin_user_store.get_by_id(db, claims.user_id), claims)
+def update_admin(db: Session, target_id: int, role, is_active, by_admin):
+    """Đổi vai trò / khóa / mở khóa tài khoản."""
+    target = _get_or_404(db, target_id)
+    if target.id == by_admin.id:
+        raise AppError(400, "Không thể tự đổi vai trò hoặc tự khóa chính mình")
 
-    if not await _revoke(redis, claims, now):  # lost a race with another use of the same token
-        raise AuthenticationError("invalid_token")
-    session = create_session_tokens(
-        settings, user_id=user["user_id"], token_version=user.get("token_version", 0), now=now
-    )
-    return user, session
+    changes = {}
+    if role is not None and role != target.role:
+        changes["role"] = role
+    if is_active is not None and is_active != target.is_active:
+        changes["is_active"] = is_active
+    if not changes:
+        return target
 
+    # Hạ quyền hoặc khóa một Super Admin đang hoạt động -> phải còn người khác thay thế
+    is_active_super = target.role == "super_admin" and target.is_active
+    will_lose_it = changes.get("role", target.role) != "super_admin" or changes.get("is_active", True) is False
+    if is_active_super and will_lose_it:
+        _ensure_another_super_admin(db)
 
-async def logout(
-    redis,
-    settings,
-    *,
-    access_token: str | None = None,
-    refresh_token: str | None = None,
-    now: datetime | None = None,
-) -> int:
-    """Revoke the given tokens. Invalid or expired tokens are ignored (nothing to revoke).
-    Returns how many tokens were revoked."""
-    now = now or datetime.now(timezone.utc)
-    revoked = 0
-    for token, token_type in ((access_token, ACCESS), (refresh_token, REFRESH)):
-        if not token:
-            continue
-        try:
-            claims = decode_token(settings, token, token_type)
-        except AuthenticationError:
-            continue
-        if await _revoke(redis, claims, now):
-            revoked += 1
-    return revoked
+    admin_store.update(db, target, changes)
+    audit_service.log(db, by_admin, "update_admin", "admin_users", target.id)
+    return target
 
 
-async def revoke_all_sessions(db, user_id: str) -> bool:
-    """Invalidate every token the user holds (e.g. password change, account takeover)."""
-    return await admin_user_store.bump_token_version(db, user_id) is not None
+def reset_password(db: Session, target_id: int, new_password: str, by_admin) -> None:
+    target = _get_or_404(db, target_id)
+    admin_store.update(db, target, {"password_hash": hash_password(new_password)})
+    audit_service.log(db, by_admin, "reset_password", "admin_users", target.id)
 
 
-async def authenticate(db, redis, settings, token: str | None) -> AuthContext:
-    """Resolve an access token to a user + role. Raises AuthenticationError."""
-    claims = decode_token(settings, token, ACCESS)
-    if await _is_revoked(redis, claims.jti):
-        raise AuthenticationError("invalid_token")
-    user = _check_user(await admin_user_store.get_by_id(db, claims.user_id), claims)
-    role = await role_store.get(db, user.get("role"))
-    return build_context(user, role)
-
-
-# --------------------------------------------------------------------------- #
-# Views
-# --------------------------------------------------------------------------- #
-def effective_permissions(ctx: AuthContext) -> list[str]:
-    """What the caller can really use. An unverified poi_owner is limited to
-    OWNER_UNVERIFIED_ALLOWED regardless of the role's permission list."""
-    if ctx.role is None:
-        return []
-    perms = set(ctx.permissions)
-    if ctx.role_name == POI_OWNER_ROLE and not ctx.is_poi_owner_verified:
-        perms = {p for p in perms if p in OWNER_UNVERIFIED_ALLOWED}
-    return [WILDCARD] if WILDCARD in perms else sorted(perms)
-
-
-def user_view(ctx: AuthContext) -> dict:
-    """Safe public view of the caller: never includes the password hash or any CCCD data."""
-    user = ctx.user
-    return {
-        "user_id": user["user_id"],
-        "username": user["username"],
-        "email": user.get("email"),
-        "role": user.get("role"),
-        "is_active": bool(user.get("is_active")),
-        "is_poi_owner_verified": ctx.is_poi_owner_verified,
-        "owner_status": user.get("owner_status", "none"),
-        "permissions": effective_permissions(ctx),
-    }
-
-
-def token_response(session: SessionTokens) -> dict:
-    """Body for Bearer-header clients (browsers use the httpOnly cookies set alongside)."""
-    return {
-        "token_type": "bearer",
-        "access_token": session.access_token,
-        "refresh_token": session.refresh_token,
-        "expires_in": ACCESS_TOKEN_MINUTES * 60,
-        "refresh_expires_in": REFRESH_TOKEN_DAYS * 24 * 3600,
-    }
+def delete_admin(db: Session, target_id: int, by_admin) -> None:
+    target = _get_or_404(db, target_id)
+    if target.id == by_admin.id:
+        raise AppError(400, "Không thể tự xóa chính mình")
+    if target.role == "super_admin" and target.is_active:
+        _ensure_another_super_admin(db)
+    admin_store.delete(db, target)
+    audit_service.log(db, by_admin, "delete_admin", "admin_users", target_id)

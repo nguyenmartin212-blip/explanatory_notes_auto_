@@ -1,12 +1,12 @@
 .device-usage {
-  --usage-text: oklch(25% 0.024 150);
-  --usage-muted: oklch(43% 0.026 150);
-  --usage-line: oklch(88% 0.014 150);
-  --usage-surface: oklch(98.5% 0.006 150);
-  --usage-accent: oklch(43% 0.1 151);
-  --usage-accent-hover: oklch(36% 0.09 151);
+  --usage-text: var(--ink);
+  --usage-muted: var(--muted);
+  --usage-line: var(--line);
+  --usage-surface: var(--surface);
+  --usage-accent: var(--forest);
+  --usage-accent-hover: #345342;
   color: var(--usage-text);
-  font: 0.875rem/1.45 system-ui, sans-serif;
+  font: 0.875rem/1.45 var(--sans);
   min-width: 0;
 }
 
@@ -33,7 +33,8 @@
   font: inherit;
   border-radius: 0.55rem;
   padding: 0.5rem 0.65rem;
-  min-height: 2.5rem;
+  box-sizing: border-box;
+  min-height: 2.75rem;
 }
 
 .device-usage__filters input,
@@ -76,6 +77,17 @@
 .device-usage__note { margin: 0.5rem 0; }
 .device-usage__error { color: oklch(43% 0.16 25); }
 .device-usage h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; }
+.device-usage h2.device-usage__title { margin-top: 0; }
+.device-usage__options summary { min-height: 44px; align-content: center; color: var(--usage-text); cursor: pointer; font-weight: 600; }
+.device-usage__chart { margin: 12px 0 0; }
+.device-usage__chart figcaption { color: var(--usage-muted); font-size: 12px; margin-bottom: 12px; }
+.device-usage__plot { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; }
+.device-usage__axis { display: flex; flex-direction: column; justify-content: space-between; text-align: right; height: 125px; font-size: 10px; }
+.device-usage__bars { list-style: none; display: flex; margin: 0; padding: 0; min-width: 0; overflow-x: auto; }
+.device-usage__bars li { flex: 1 0 33px; position: relative; display: flex; justify-content: center; align-items: end; height: 125px; margin-bottom: 24px; border-bottom: 1px solid var(--usage-line); background: repeating-linear-gradient(to top, transparent 0 calc(25% - 1px), var(--usage-line) calc(25% - 1px) 25%); }
+.device-usage__bar { display: block; width: min(55%, 50px); border-radius: 5px 5px 0 0; background: #9eae99; }
+.device-usage__bars li:last-child .device-usage__bar { background: var(--usage-accent); }
+.device-usage__period { position: absolute; top: 100%; margin-top: 3px; color: var(--usage-muted); font-size: 10px; white-space: nowrap; }
 
 .device-usage__table { overflow-x: auto; }
 .device-usage table { border-collapse: collapse; width: 100%; }

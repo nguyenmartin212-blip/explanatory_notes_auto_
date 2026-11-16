@@ -3,6 +3,19 @@ export type QrPoiPayload = {
   poiId: string;
 };
 
+export function parseManagedQr(rawValue: string): string | null {
+  const value = rawValue.trim();
+  if (/^[A-Za-z0-9_-]{3,40}$/.test(value)) return value;
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol)) return null;
+    const code = url.searchParams.get('qr');
+    return code && /^[A-Za-z0-9_-]{3,40}$/.test(code) ? code : null;
+  } catch {
+    return null;
+  }
+}
+
 function cleanId(value: string | null | undefined) {
   const id = value?.trim();
   return id && /^[a-z0-9][a-z0-9-]{1,80}$/i.test(id) ? id : null;
@@ -13,7 +26,7 @@ function cleanId(value: string | null | undefined) {
  * - gotohorizon://poi/<poi-id>
  * - https://<any-host>/poi/<poi-id>
  * - https://<any-host>/?poi=<poi-id>
- * - https://<any-host>/?story=<poi-id> (compatible with the web demo)
+ * - https://<any-host>/?story=<poi-id>
  * - GTH:POI:<poi-id>
  * - plain <poi-id>
  */

@@ -1,4 +1,4 @@
-export type SupportedLanguage = 'vi' | 'en' | 'zh' | 'ko';
+export type SupportedLanguage = string;
 
 export type LocalizedText = Partial<Record<SupportedLanguage, string>> & {
   vi: string;
