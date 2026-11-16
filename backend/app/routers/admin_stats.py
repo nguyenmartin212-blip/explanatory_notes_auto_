@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import get_current_admin
+from app.dependencies import get_current_admin, require_admin_permission
 from app.schemas.analytics import OnlineResponse, QrCreate, QrOut, QrUpdate, StatsSummary
 from app.services import analytics_service
 from app.stores import analytics_store
@@ -15,13 +15,16 @@ router = APIRouter(
 )
 
 
-@router.get("/stats/online", response_model=OnlineResponse)
+stats_access = [Depends(require_admin_permission("analytics:read"))]
+
+
+@router.get("/stats/online", response_model=OnlineResponse, dependencies=stats_access)
 def online_now(db: Session = Depends(get_db)):
     """Số người đang online (thiết bị có heartbeat trong 90 giây gần nhất)."""
     return OnlineResponse(online_now=analytics_service.online_now(db))
 
 
-@router.get("/stats/summary", response_model=StatsSummary)
+@router.get("/stats/summary", response_model=StatsSummary, dependencies=stats_access)
 def stats_summary(db: Session = Depends(get_db)):
     """Tổng hợp: số người online, lượt khách, lượt quét QR, top điểm (xem / nghe), ngôn ngữ, QR hiệu quả."""
     return analytics_service.summary(db)
