@@ -2,6 +2,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from app.core.constants import SOURCE_LANG
 from app.models import Language, PoiLocalization
 
 
@@ -15,12 +16,14 @@ def get_language(db: Session, code: str):
 
 
 # ---------- Bản dịch ----------
-def get(db: Session, poi_id: int, lang_code: str):
-    return (
+def get(db: Session, poi_id: int, lang_code: str, *, lock: bool = False):
+    query = (
         db.query(PoiLocalization)
         .filter(PoiLocalization.poi_id == poi_id, PoiLocalization.lang_code == lang_code)
-        .first()
     )
+    if lock:
+        query = query.populate_existing().with_for_update()
+    return query.first()
 
 
 def list_by_poi(db: Session, poi_id: int):
@@ -47,9 +50,9 @@ def get_map(db: Session, poi_ids, lang_codes):
 
 
 def upsert(db: Session, poi_id: int, lang_code: str, name: str, description: str,
-           is_machine_translated: bool, audio_status: str = "none"):
+           is_machine_translated: bool, audio_status: str = "none", *, commit=True):
     """Có rồi thì cập nhật, chưa có thì thêm mới."""
-    loc = get(db, poi_id, lang_code)
+    loc = get(db, poi_id, lang_code, lock=True)
     if loc is None:
         loc = PoiLocalization(poi_id=poi_id, lang_code=lang_code)
         db.add(loc)
@@ -58,8 +61,10 @@ def upsert(db: Session, poi_id: int, lang_code: str, name: str, description: str
     loc.is_machine_translated = is_machine_translated
     loc.audio_status = audio_status
     loc.updated_at = datetime.now()
-    db.commit()
-    db.refresh(loc)
+    db.flush()
+    if commit:
+        db.commit()
+        db.refresh(loc)
     return loc
 
 
@@ -74,13 +79,10 @@ def set_audio(db: Session, loc: PoiLocalization, audio_url, status: str, content
 
 
 def mark_stale(db: Session, poi_id: int):
-    """Nội dung gốc đã đổi: vô hiệu audio cũ. Trả về danh sách audio_url cũ để xóa file."""
-    old_urls = []
+    """Nội dung gốc đã đổi: vô hiệu audio gốc và audio của bản dịch máy."""
     for loc in list_by_poi(db, poi_id):
-        if loc.audio_url:
-            old_urls.append(loc.audio_url)
+        if loc.lang_code != SOURCE_LANG and not loc.is_machine_translated:
+            continue
         loc.audio_url = None
         loc.content_hash = None
         loc.audio_status = "processing"
-    db.commit()
-    return old_urls
