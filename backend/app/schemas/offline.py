@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class OfflinePoi(BaseModel):
@@ -10,11 +10,13 @@ class OfflinePoi(BaseModel):
     region_id: int
     name: str
     description: str
+    region_code: str
     latitude: float
     longitude: float
     trigger_radius: int
     audio_priority: int
     cover_image_url: Optional[str] = None
+    image_urls: list[str] = Field(default_factory=list)
     audio_url: Optional[str] = None
     audio_bytes: Optional[int] = None   # dung lượng file audio, để hiện "Tải về 12 MB"
     lang: str
