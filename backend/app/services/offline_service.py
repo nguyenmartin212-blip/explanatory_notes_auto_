@@ -16,9 +16,6 @@ from app.schemas.offline import OfflineManifest, OfflinePoi, OfflineVersion
 from app.services import localization_service, tts_service
 from app.stores import localization_store, poi_store, region_store
 
-MAX_POIS = 1000
-
-
 def build_manifest(db: Session, lang: str, region_code: Optional[str]) -> OfflineManifest:
     region_id = None
     if region_code:
@@ -27,14 +24,14 @@ def build_manifest(db: Session, lang: str, region_code: Optional[str]) -> Offlin
             raise AppError(404, "Không tìm thấy miền")
         region_id = region.id
 
-    pois = poi_store.list_active(db, region_id, 0, MAX_POIS)
+    pois = poi_store.list_all_active(db, region_id, images=True)
     loc_map = localization_store.get_map(
         db, [p.id for p in pois], localization_service.lang_codes_needed(lang)
     )
 
     items = []
     total_bytes = 0
-    hasher = hashlib.md5()
+    hasher = hashlib.sha256()
     for poi in pois:
         content = localization_service.pick_content(poi, loc_map, lang)
 
@@ -43,24 +40,26 @@ def build_manifest(db: Session, lang: str, region_code: Optional[str]) -> Offlin
 
         size = tts_service.audio_size(content["audio_url"])
         total_bytes += size or 0
-        hasher.update(f"{poi.id}|{content['audio_url']}|{content['lang']}|{version};".encode("utf-8"))
-
-        items.append(OfflinePoi(
+        item = OfflinePoi(
             id=poi.id,
             region_id=poi.region_id,
             name=content["name"],
             description=content["description"],
+            region_code=poi.region.code,
             latitude=poi.latitude,
             longitude=poi.longitude,
             trigger_radius=poi.trigger_radius,
             audio_priority=poi.audio_priority,
             cover_image_url=poi.cover_image_url,
+            image_urls=poi.image_urls,
             audio_url=content["audio_url"],
             audio_bytes=size,
             lang=content["lang"],
             is_fallback=content["is_fallback"],
             version=version,
-        ))
+        )
+        hasher.update(item.model_dump_json().encode("utf-8"))
+        items.append(item)
 
     return OfflineManifest(
         lang=lang,
