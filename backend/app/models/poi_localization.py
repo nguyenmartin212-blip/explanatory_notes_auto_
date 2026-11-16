@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import CHAR, Boolean, Column, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -18,8 +18,8 @@ class PoiLocalization(Base):
     description = Column(Text, nullable=False)
     audio_url = Column(String(500))
     # none | processing | ready | failed
-    audio_status = Column(String(20), nullable=False, default="none")
-    content_hash = Column(String(32))  # dùng để cache audio
+    audio_status = Column(Enum("none", "processing", "ready", "failed"), nullable=False, default="none")
+    content_hash = Column(CHAR(32))  # dùng để cache audio
     is_machine_translated = Column(Boolean, nullable=False, default=True)
     updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
 
