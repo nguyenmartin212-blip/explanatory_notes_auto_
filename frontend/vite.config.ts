@@ -25,7 +25,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '^/(?:admin/[^/]|api/|pois(?:[/?]|$)|audio/|localizations/|media/|static/|health(?:/|$)|docs(?:/|$)|openapi[.]json$|warmup$)': {
+      '^/(?:api|admin/(?:auth|users|roles|audio-tasks|visitor-visits)|static)(?:[/?]|$)|^/(?:pois|health)/?(?:[?]|$)': {
         target: 'http://127.0.0.1:3000',
         changeOrigin: false,
       },
