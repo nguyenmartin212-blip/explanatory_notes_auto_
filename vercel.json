@@ -8,7 +8,11 @@
     },
     "fe": {
       "root": "frontend",
-      "framework": "vite"
+      "framework": "vite",
+      "rewrites": [
+        { "source": "/admin", "destination": "/index.html" },
+        { "source": "/poi/:id", "destination": "/index.html" }
+      ]
     }
   },
   "rewrites": [
@@ -17,8 +21,6 @@
     { "source": "/pois", "destination": { "service": "be" } },
     { "source": "/static/:path*", "destination": { "service": "be" } },
     { "source": "/health", "destination": { "service": "be" } },
-    { "source": "/admin", "destination": { "service": "fe", "path": "/index.html" } },
-    { "source": "/poi/:id", "destination": { "service": "fe", "path": "/index.html" } },
     { "source": "/(.*)", "destination": { "service": "fe" } }
   ]
 }
