@@ -13,7 +13,10 @@ ALGORITHM = "HS256"
 
 def hash_password(password: str) -> str:
     """Biến mật khẩu thường thành chuỗi băm để lưu DB (không thể dịch ngược)."""
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    encoded = password.encode("utf-8")
+    if len(encoded) > 72:
+        raise AppError(422, "Mật khẩu vượt quá 72 byte")
+    return bcrypt.hashpw(encoded, bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(password: str, password_hash: str) -> bool:
@@ -33,6 +36,12 @@ def create_access_token(user_id: int, role: str) -> str:
 
 def decode_token(token: str) -> dict:
     try:
-        return jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM], options={"require": ["sub", "exp"]})
+        sub = payload["sub"]
+        if not isinstance(sub, str) or len(sub) > 10 or not sub.isascii() or not sub.isdecimal():
+            raise jwt.InvalidTokenError("Invalid account ID")
+        if not 0 < int(sub) <= 2**31 - 1:
+            raise jwt.InvalidTokenError("Invalid account ID")
+        return payload
     except jwt.PyJWTError:
         raise AppError(401, "Token không hợp lệ hoặc đã hết hạn")
