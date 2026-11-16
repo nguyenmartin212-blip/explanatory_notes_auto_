@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import POI, QrCode, VisitEvent, VisitorDevice, VisitSession
@@ -50,25 +51,33 @@ def get_device(db: Session, device_id: str):
     return db.query(VisitorDevice).filter(VisitorDevice.id == device_id).first()
 
 
-def create_device(db: Session, device_id: str, lang_code, device_type: str):
-    device = VisitorDevice(id=device_id, preferred_lang=lang_code, device_type=device_type)
-    db.add(device)
-    db.commit()
-    return device
+def ensure_device(db: Session, device_id: str, lang_code, device_type: str):
+    device = get_device(db, device_id)
+    if device is None:
+        try:
+            with db.begin_nested():
+                device = VisitorDevice(id=device_id, preferred_lang=lang_code, device_type=device_type)
+                db.add(device)
+                db.flush()
+        except IntegrityError:
+            device = db.get(VisitorDevice, device_id, with_for_update=True)
+            if device is None:
+                raise
+    touch_device(db, device, lang_code, commit=False)
 
 
-def touch_device(db: Session, device: VisitorDevice, lang_code=None):
+def touch_device(db: Session, device: VisitorDevice, lang_code=None, *, commit=True):
     device.last_seen_at = datetime.now()
     if lang_code:
         device.preferred_lang = lang_code
-    db.commit()
+    if commit:
+        db.commit()
 
 
 def create_session(db: Session, device_id: str, qr_code_id, lang_code):
     session = VisitSession(device_id=device_id, qr_code_id=qr_code_id, lang_code=lang_code)
     db.add(session)
-    db.commit()
-    db.refresh(session)
+    db.flush()
     return session
 
 
@@ -81,9 +90,10 @@ def touch_session(db: Session, session: VisitSession):
     db.commit()
 
 
-def add_event(db: Session, session_id: int, event_type: str, poi_id=None, lang_code=None):
+def add_event(db: Session, session_id: int, event_type: str, poi_id=None, lang_code=None, *, commit=True):
     db.add(VisitEvent(session_id=session_id, event_type=event_type, poi_id=poi_id, lang_code=lang_code))
-    db.commit()
+    if commit:
+        db.commit()
 
 
 # ---------- Thống kê ----------
@@ -102,7 +112,7 @@ def count_sessions(db: Session) -> int:
 
 
 def scans_by_day(db: Session, days: int = 7):
-    since = datetime.now() - timedelta(days=days)
+    since = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
     day = func.date(VisitEvent.created_at)
     rows = (
         db.query(day, func.count(VisitEvent.id))
@@ -125,7 +135,7 @@ def count_qr_scans(db: Session) -> int:
 
 def visitors_by_day(db: Session, days: int = 7):
     """Mỗi ngày có bao nhiêu khách (thiết bị) khác nhau."""
-    since = datetime.now() - timedelta(days=days)
+    since = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
     day = func.date(VisitSession.started_at)
     rows = (
         db.query(day, func.count(func.distinct(VisitSession.device_id)))
