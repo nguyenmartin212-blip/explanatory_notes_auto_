@@ -1,0 +1,24 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "be": {
+      "root": "backend",
+      "framework": "fastapi",
+      "entrypoint": "app.main:app"
+    },
+    "fe": {
+      "root": "frontend",
+      "framework": "vite"
+    }
+  },
+  "rewrites": [
+    { "source": "/api/:path*", "destination": { "service": "be" } },
+    { "source": "/admin/:section(auth|users|roles|audio-tasks|visitor-visits)/:path*", "destination": { "service": "be" } },
+    { "source": "/pois", "destination": { "service": "be" } },
+    { "source": "/static/:path*", "destination": { "service": "be" } },
+    { "source": "/health", "destination": { "service": "be" } },
+    { "source": "/admin", "destination": { "service": "fe", "path": "/index.html" } },
+    { "source": "/poi/:id", "destination": { "service": "fe", "path": "/index.html" } },
+    { "source": "/(.*)", "destination": { "service": "fe" } }
+  ]
+}

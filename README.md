@@ -37,6 +37,14 @@ Mở [trang du khách](http://localhost:5173/) hoặc [trang quản trị](http:
 
 Khi triển khai, phục vụ `frontend/dist` qua HTTPS và chuyển tiếp API cùng origin sang FastAPI, gồm `/api/`, `/admin/` (các đường dẫn con), `/pois` và `/static/`. Trả `index.html` cho các đường dẫn giao diện như `/admin` và `/poi/<id>`. Duy trì thư mục `backend/app/static/audio` trên bộ lưu trữ lâu dài nếu tạo audio trên máy chủ.
 
+### Vercel Services
+
+Project dự kiến là `explanatory-notes-auto`. Chọn **Services** làm Framework Preset và đặt **Root Directory** ở thư mục gốc repo, nơi chứa `vercel.json`. Service `fe` phục vụ trang du khách tại `/` và trang đăng nhập/quản trị tại `/admin`. Để trống `VITE_API_URL` trong project này để các yêu cầu gửi kèm cookie quản trị qua cùng domain.
+
+Service `be` nhận `/api/*`, các route API quản trị được liệt kê trong `vercel.json`, `/pois`, `/static/*` và `/health`. Swagger, OpenAPI và readiness có thể kiểm tra trực tiếp trên backend local ở cổng 3000. Domain dùng chung chỉ công khai liveness qua `/health`.
+
+Chạy `vercel dev --local` từ thư mục gốc để thử routing của hai service. Cấu hình MySQL và `SECRET_KEY` cho backend theo [README Backend](backend/README.md). Khi triển khai, kiểm tra `/`, `/admin`, `/health` và `/api/v1/pois` trên domain dùng chung.
+
 ## Dữ liệu của bản SQL
 
 - File SQL có miền, ngôn ngữ, danh mục và ba POI được công khai. Bản đồ dùng tọa độ POI và nền OpenStreetMap. GPS lấy từ quyền vị trí của trình duyệt.

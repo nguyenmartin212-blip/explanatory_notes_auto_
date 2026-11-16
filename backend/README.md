@@ -2,6 +2,12 @@
 
 Cài và chạy trực tiếp bằng Python 3.12 theo [hướng dẫn ở thư mục gốc](../README.md). Lúc khởi động, Backend chỉ kiểm tra các bảng của schema đã nhập. Biến `DATABASE_URL` có thể dùng trong môi trường kiểm thử. Cách chạy thông thường lấy thông số MySQL từ `backend/.env`.
 
+## Triển khai backend trên Vercel
+
+Đặt Root Directory là `backend` và bật biến môi trường hệ thống của Vercel. Trong môi trường Production, cấu hình `DATABASE_URL` hoặc các biến `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` trỏ đến MySQL đã nhập `thuyet_minh.sql`. Sau khi deploy, `/health` kiểm tra tiến trình và `/health/ready` kiểm tra kết nối MySQL. Đặt `SECRET_KEY` cố định nếu dùng đăng nhập quản trị.
+
+Trên Vercel, audio sinh trong lúc chạy nằm ở thư mục tạm của từng instance. Để phục vụ audio lâu dài, lưu tệp trên kho bền vững và dùng URL HTTPS trong bản dịch, hoặc chạy backend ở môi trường có ổ đĩa bền vững.
+
 ## API chính
 
 - `GET /api/v1/pois`, `GET /api/v1/pois/{poi_id}` và `GET /api/v1/pois/nearby` trả POI công khai với miền, tọa độ, ảnh, nội dung theo ngôn ngữ và audio sẵn sàng. Danh sách có `region`, `lang`, `skip` và `limit`.
