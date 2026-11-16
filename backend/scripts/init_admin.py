@@ -8,13 +8,11 @@ import sys
 
 import app.models  # noqa: F401
 from app.core.security import hash_password
-from app.database import Base, SessionLocal, engine
+from app.database import SessionLocal
 from app.stores import admin_store
 
 
 def main() -> None:
-    Base.metadata.create_all(bind=engine)
-
     username = os.getenv("ADMIN_USERNAME") or input("Tên đăng nhập admin: ").strip()
     password = os.getenv("ADMIN_PASSWORD") or getpass.getpass("Mật khẩu (ít nhất 8 ký tự): ")
 
